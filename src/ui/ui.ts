@@ -4,8 +4,11 @@ import type { CameraRig } from '../render/cameraRig';
 import type { ClubId } from '../sim/shot';
 import { METER, accuracyWindow, type MeterStage } from '../sim/meter';
 import { HUD_HTML } from './markup';
+import { PracticeReplay, practiceMap, practiceOutcome } from '../game/practice';
+import { clubById } from '../sim/shot';
+import { ITEMS } from '../sim/items';
 
-const SCREENS = ['scrTitle', 'scrPractice', 'scrSettings', 'scrPause', 'scrCard', 'scrHole', 'scrResults', 'scrLost', 'scrBasket', 'scrClub'];
+const SCREENS = ['scrTitle', 'scrPractice', 'scrSettings', 'scrPause', 'scrCard', 'scrHole', 'scrResults', 'scrLost', 'scrBasket', 'scrClub', 'scrShot'];
 
 /** Thin DOM layer: no game rules here, just showing state and forwarding taps. */
 export class UI {
@@ -158,11 +161,47 @@ export class UI {
   }
 
   setSwingLocked(locked: boolean) {
+    (this.$('practiceShotBtn') as HTMLButtonElement).disabled = locked;
     this.clubButtons.forEach((button) => {
       button.disabled = locked;
     });
     this.$('aimStrip').setAttribute('aria-disabled', String(locked));
     for (const id of ['aimLeft', 'aimRight']) (this.$(id) as HTMLButtonElement).disabled = locked;
+  }
+
+  setPracticeShot(power: number | null, holeDone = false) {
+    this.$('practiceShotBtn').classList.toggle('hidden', power == null || holeDone);
+    this.$('holeReviewShot').classList.toggle('hidden', power == null || !holeDone);
+    if (power != null) this.$('practiceShotBtn').textContent = `↶ Last shot · ${Math.round(power * 100)}%`;
+  }
+
+  showPracticeShot(replay: PracticeReplay, holeDone: boolean) {
+    const r = replay.result!;
+    const setup = replay.restore()!;
+    const club = clubById(setup.round.club);
+    const spin = setup.round.club === 'putter' ? '' : setup.spin > 0 ? ' · Topspin' : setup.spin < 0 ? ' · Backspin' : ' · No spin';
+    const item = setup.itemArmed && setup.round.item ? ` · ${ITEMS[setup.round.item].name}` : '';
+    this.$('shotSetup').textContent = `${club.name} · ${Math.round(r.power * 100)}% power${spin}${item}`;
+    this.$('shotOutcome').textContent = practiceOutcome(r);
+    this.$('shotDistance').textContent = `${r.distance.toFixed(1)}y`;
+    this.$('shotCarry').textContent = r.carry == null ? '—' : `${r.carry.toFixed(1)}y`;
+    this.$('shotToPin').textContent = `${r.toPin.toFixed(1)}y`;
+    this.$('shotAccuracy').textContent = r.accuracy;
+    const m = practiceMap(replay);
+    const points = m.points.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
+    this.$('shotMap').innerHTML = `<svg viewBox="0 0 320 180" role="img" aria-label="Top-down map of your actual shot, from start to finish${m.pin ? ', with the pin' : '; pin outside view'}">
+      <defs><pattern id="shotGrid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#527a6530" stroke-width="1"/></pattern></defs>
+      <rect width="320" height="180" rx="16" fill="#dceccb"/><rect width="320" height="180" fill="url(#shotGrid)"/>
+      <polyline points="${points}" fill="none" stroke="#fff4dc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+      <polyline points="${points}" fill="none" stroke="#376d88" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="${m.start.x}" cy="${m.start.y}" r="5" fill="#fff4dc" stroke="#376d88" stroke-width="3"/>
+      <circle cx="${m.end.x}" cy="${m.end.y}" r="6" fill="#ed876f" stroke="#3b2f2a" stroke-width="2"/>
+      ${m.pin ? `<path d="M${m.pin.x} ${m.pin.y}v-18l12 4-12 4" fill="#e46754" stroke="#3b2f2a" stroke-width="1.5"/>` : '<text x="12" y="20" fill="#3d6351" font-size="10">Pin outside view</text>'}
+      <text x="303" y="20" fill="#3d6351" font-size="11">N↑</text>
+    </svg>`;
+    this.$('shotContinue').textContent = holeDone ? 'Back to score' : 'Keep playing';
+    this.show('scrShot');
+    this.$('shotRetry').focus({ preventScroll: true });
   }
 
   setSwingMode(mode: 'meter' | 'drag' | 'tap') {
@@ -172,6 +211,7 @@ export class UI {
   }
 
   setOverview(on: boolean) {
+    this.$('practiceShotBtn').classList.toggle('looking', on);
     const b = this.$('overviewBtn');
     b.classList.toggle('active', on);
     b.querySelector('span')!.textContent = on ? 'Back' : 'Look';

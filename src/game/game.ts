@@ -14,6 +14,7 @@ import { FLIGHT_PITCH, PITCH } from '../render/cameraRig';
 import { ACORN_HOLE, ITEMS, basketGuaranteeFor, basketHoles, offerItems, type ItemId } from '../sim/items';
 import { CAPS, ErrandTracker, PROJECTS, SCARVES, errandsDone, holeStars, restoredSet, totalStars } from './club';
 import { SaveStore, type SavedRound } from './save';
+import { PracticeReplay } from './practice';
 
 type Phase = 'title' | 'intro' | 'basket' | 'aim' | 'swing' | 'flight' | 'settle' | 'holed' | 'holeDone' | 'results';
 
@@ -112,6 +113,7 @@ export class Game {
   private steerInput = 0;
   private waitingRescue = false;
   private hitTag: string | null = null;
+  private practiceReplay = new PracticeReplay();
 
   constructor(app: HTMLElement) {
     this.ui = new UI(app);
@@ -210,6 +212,10 @@ export class Game {
     ui.onClick('btnPlay', () => this.newRound());
     ui.onClick('btnContinue', () => this.continueRound());
     ui.onClick('btnPractice', () => ui.showPractice(this.store.bests, (i) => this.startPractice(i)));
+    ui.onClick('practiceShotBtn', () => this.reviewPracticeShot());
+    ui.onClick('holeReviewShot', () => this.reviewPracticeShot());
+    ui.onClick('shotContinue', () => this.closePause());
+    ui.onClick('shotRetry', () => this.retryPracticeShot());
     ui.onClick('btnSettings', () => ui.show('scrSettings'));
     ui.onClick('menuBtn', () => this.openPause());
     ui.onClick('pResume', () => this.closePause());
@@ -300,6 +306,7 @@ export class Game {
         }
       },
       swingStart: () => {
+        this.ui.setSwingLocked(true);
         this.pulling = true;
         this.pullPower = 0;
         this.lastSwingTick = 0;
@@ -329,6 +336,7 @@ export class Game {
         this.beginSwing(p);
       },
       swingCancel: () => {
+        this.ui.setSwingLocked(false);
         this.ui.hidePower();
         this.pulling = false;
         this.pullPower = 0;
@@ -403,6 +411,7 @@ export class Game {
 
   private fireMeter(r: MeterResult) {
     this.pulling = false;
+    const intendedYaw = this.yaw;
     // Timing error turns the shot: visible and deterministic, never random.
     this.yaw += r.yawErr;
     const deg = Math.abs(r.degrees);
@@ -418,7 +427,7 @@ export class Game {
     this.ui.setMeter('done', r.offset, this.meter.power, msg, '');
     const perfect = r.grade === 'perfect';
     // A perfect strike flies a little further: a visible reward, not a hidden roll.
-    this.beginSwing(perfect ? r.power * 1.06 : r.power, perfect);
+    this.beginSwing(perfect ? r.power * 1.06 : r.power, perfect, intendedYaw, this.meter.power, msg);
     if (perfect) {
       this.ui.stamp('PERFECT!');
       if (!this.store.settings.reducedMotion) this.ui.flash();
@@ -432,6 +441,8 @@ export class Game {
 
   // ------------------------------------------------------------------ flow
   private showTitle() {
+    this.practiceReplay.clear();
+    this.ui.setPracticeShot(null);
     this.phase = 'title';
     this.overview = false;
     this.ui.setHud(false);
@@ -525,7 +536,7 @@ export class Game {
   }
 
   /** Dev helper for automated checks (see main.ts). */
-  devPractice(i: number, swing: number | null, putting = false) {
+  devPractice(i: number, swing: number | null, putting = false, review = false) {
     this.startPractice(Math.max(0, Math.min(8, i)));
     if (putting) {
       this.ballX = this.world.cupX + 7;
@@ -536,6 +547,10 @@ export class Game {
     if (swing == null) return;
     const wait = () => (this.phase === 'aim' ? this.beginSwing(swing) : window.setTimeout(wait, 100));
     wait();
+    if (review) {
+      const show = () => this.practiceReplay.result && (this.phase === 'aim' || this.phase === 'holeDone') ? this.reviewPracticeShot() : window.setTimeout(show, 100);
+      show();
+    }
   }
 
   private restartHole() {
@@ -548,6 +563,8 @@ export class Game {
   }
 
   private startHole(i: number, restore: boolean) {
+    this.practiceReplay.clear();
+    this.ui.setPracticeShot(null);
     const round = this.round!;
     round.holeIndex = i;
     this.ui.hideScreens();
@@ -673,8 +690,20 @@ export class Game {
     return `${Math.round(eff * clubById(this.club).maxCarry)}y carry`;
   }
 
-  private beginSwing(power: number, perfect = false) {
+  private beginSwing(power: number, perfect = false, intendedYaw = this.yaw, selectedPower = power, accuracy = 'Straight strike') {
     if (this.phase !== 'aim') return;
+    if (this.round?.mode === 'practice') {
+      this.practiceReplay.begin({
+        round: {
+          ...this.round,
+          ball: { x: this.ballX, z: this.ballZ, px: this.prevX, pz: this.prevZ },
+          strokes: this.strokes, club: this.club, yaw: intendedYaw,
+          item: this.heldItem, errand: { ...this.errand.s },
+        },
+        spin: this.spin, itemArmed: this.itemArmed, tapPower: this.controls.tapPower,
+      }, selectedPower, accuracy);
+      this.ui.setPracticeShot(null);
+    }
     this.shotPerfect = perfect;
     this.shotSpin = this.club === 'putter' ? 0 : this.spin;
     this.shotItem = this.itemArmed ? this.heldItem : null;
@@ -715,6 +744,7 @@ export class Game {
       spin: this.shotSpin,
       item: this.shotItem,
     });
+    if (this.round?.mode === 'practice') this.practiceReplay.sample(this.sim);
     this.errand.shotStart(this.shotClub, this.lie);
     this.hitTag = null;
     this.steerInput = 0;
@@ -813,6 +843,7 @@ export class Game {
     this.phaseT = 0;
     const scen = this.r.scenery;
     const w = this.world;
+    if (this.round?.mode === 'practice') this.practiceReplay.finish(s, w.cupX, w.cupZ);
     if (s.state === BallState.Holed) {
       this.phase = 'holed';
       this.phaseT = 0;
@@ -903,6 +934,55 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ the fun layer
+  private reviewPracticeShot() {
+    if (this.round?.mode !== 'practice' || !this.practiceReplay.result || this.pulling || this.meter.active || this.paused) return;
+    if (this.phase !== 'aim' && this.phase !== 'holeDone') return;
+    this.controls.cancelAll();
+    this.paused = true;
+    this.ui.showPracticeShot(this.practiceReplay, this.phase === 'holeDone');
+    this.audio.tap();
+  }
+
+  private retryPracticeShot() {
+    if (this.round?.mode !== 'practice' || (this.phase !== 'aim' && this.phase !== 'holeDone') || this.meter.active || this.pulling) return;
+    const setup = this.practiceReplay.restore();
+    if (!setup?.round.ball) return;
+    this.controls.cancelAll();
+    this.cancelMeter();
+    // Keep the existing world: its wind, slopes, obstacles and restored projects stay identical.
+    this.round = setup.round;
+    const ball = setup.round.ball;
+    this.ballX = ball.x; this.ballZ = ball.z;
+    this.prevX = ball.px; this.prevZ = ball.pz;
+    this.strokes = setup.round.strokes;
+    this.heldItem = setup.round.item ?? null;
+    this.itemArmed = setup.itemArmed;
+    this.spin = setup.spin;
+    this.controls.tapPower = setup.tapPower;
+    this.errand.restore(setup.round.errand);
+    this.waitingRescue = false;
+    this.fastForward = false;
+    this.hitStop = this.acc = this.phaseT = 0;
+    this.paused = this.overview = false;
+    this.phase = 'aim';
+    this.sim.place(ball.x, ball.z);
+    this.r.effects.clearTrail();
+    this.r.effects.flag.visible = true;
+    this.ui.hideScreens();
+    this.ui.hideSpeech();
+    this.ui.setSkipHint(false);
+    this.ui.setOverview(false);
+    this.ui.setFlying(false);
+    this.prepareAim(setup.round.yaw, setup.round.club);
+    this.refreshMods();
+    this.refreshErrandChip();
+    this.ui.setPracticeShot(this.practiceReplay.result!.power);
+    this.frameAim(false);
+    this.audio.tap();
+    this.ui.toastMsg('Same spot. Another try!', `Last shot: ${Math.round(this.practiceReplay.result!.power * 100)}% power. Adjust your aim or power and swing.`, 2700);
+    this.wake(3);
+  }
+
   private enterAim() {
     this.phase = 'aim';
     this.ui.hideScreens();
@@ -1011,6 +1091,7 @@ export class Game {
     this.phase = 'aim';
     this.ui.setFlying(false);
     this.prepareAim(this.shotYaw, this.shotClub);
+    this.ui.setPracticeShot(this.practiceReplay.result?.power ?? null);
     this.frameAim(false);
     this.saveNow();
     this.wake(3);
@@ -1101,6 +1182,7 @@ export class Game {
     this.phase = 'aim';
     this.ui.setFlying(false);
     this.prepareAim(null, null);
+    this.ui.setPracticeShot(this.practiceReplay.result?.power ?? null);
     this.frameAim(false);
     this.refreshErrandChip();
     this.saveNow();
@@ -1148,6 +1230,7 @@ export class Game {
     );
     this.audio.fanfare(this.strokes <= par);
     this.ui.setFlying(true);
+    this.ui.setPracticeShot(this.practiceReplay.result?.power ?? null, true);
     this.updateHud();
   }
 
@@ -1256,7 +1339,8 @@ export class Game {
     this.r.loadHole(this.world);
     this.r.effects.setHole(this.world);
     this.ui.$('scrLost').classList.add('hidden');
-    if (this.phase === 'title') this.ui.show('scrTitle');
+    if (this.paused) this.ui.show('scrPause');
+    else if (this.phase === 'title') this.ui.show('scrTitle');
     this.wake(3);
   }
 
@@ -1706,6 +1790,7 @@ export class Game {
         while (this.acc >= DT && this.sim.moving) {
           this.acc -= DT;
           this.sim.step(DT);
+          if (this.round?.mode === 'practice') this.practiceReplay.sample(this.sim);
           this.flightSteps++;
           if (this.sim.state === BallState.Air && this.flightSteps % 3 === 0) this.r.effects.pushTrail(this.sim.x, this.sim.y, this.sim.z);
         }

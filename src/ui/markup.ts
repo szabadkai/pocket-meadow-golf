@@ -40,6 +40,7 @@ export const HUD_HTML = `
     </div>
     <div id="stamp" class="stamp hidden"></div>
     <button id="overviewBtn" class="bigBtn overviewBtn" aria-label="Look around the hole">${ICONS.map}<span>Look</span></button>
+    <button id="practiceShotBtn" class="practiceShotBtn hidden" aria-label="Review last practice shot">↶ Last shot</button>
     <div id="lookTools" class="lookTools hidden">
       <button id="zoomIn" class="bigBtn round" aria-label="Zoom in">+</button>
       <button id="zoomOut" class="bigBtn round" aria-label="Zoom out">−</button>
@@ -126,7 +127,7 @@ export const HUD_HTML = `
   <section id="scrPractice" class="screen panel hidden">
     <div class="card">
       <h2><button class="iconBtn back" data-back aria-label="Back">${ICONS.back}</button>Practice</h2>
-      <p class="muted">Pick any hole. Scores aren't counted.</p>
+      <p class="muted">Pick any hole. Review each shot’s path, then retry from the same spot with the same wind. Your round stays saved.</p>
       <div id="practiceGrid" class="holeGrid"></div>
     </div>
   </section>
@@ -189,7 +190,29 @@ export const HUD_HTML = `
       <div id="holeStars" class="holeStars"></div>
       <div id="holeUnlocks" class="holeUnlocks"></div>
       <div id="holeCard"></div>
+      <button id="holeReviewShot" class="bigBtn hidden">↶ Review last shot</button>
       <button id="btnNext" class="bigBtn primary">Next hole</button>
+    </div>
+  </section>
+  <section id="scrShot" class="screen panel hidden" role="dialog" aria-modal="true" aria-label="Practice shot review">
+    <div class="card shotCard">
+      <div class="shotEyebrow">PRACTICE · LEARN YOUR SHOT</div>
+      <h2>One more try?</h2>
+      <p id="shotSetup" class="muted"></p>
+      <div id="shotMap" class="shotMap"></div>
+      <div class="shotLegend"><span>○ Start</span><span>━ Actual path</span><span>● Finish</span></div>
+      <div id="shotOutcome" class="shotOutcome"></div>
+      <div class="shotStats">
+        <div><strong id="shotDistance"></strong><small>Distance</small></div>
+        <div><strong id="shotCarry"></strong><small>First carry</small></div>
+        <div><strong id="shotToPin"></strong><small>Left to pin</small></div>
+      </div>
+      <p id="shotAccuracy" class="shotAccuracy"></p>
+      <p class="shotRetryNote">Retry restores your spot, aim, club, spin and snack. Same wind, no extra stroke.</p>
+      <div class="shotActions">
+        <button id="shotRetry" class="bigBtn primary">↶ Retry this shot</button>
+        <button id="shotContinue" class="bigBtn">Keep playing</button>
+      </div>
     </div>
   </section>
   <section id="scrResults" class="screen panel hidden">
