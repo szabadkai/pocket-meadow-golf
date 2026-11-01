@@ -78,7 +78,8 @@ export const HUD_HTML = `
         <div id="padLabel" class="padLabel">Pull down to swing</div>
       </div>
     </div>
-    <div id="meterPad" class="meterPad hidden" aria-label="Swing meter: tap to start, tap to set power, tap on the line">
+    <div id="meterPad" class="meterPad hidden" aria-label="Hold for power, release, then tap on the mark">
+      <div class="meterRow"><b id="meterLabel">Hold for power</b><span id="meterCarry"></span></div>
       <div class="meterBar">
         <div id="meterZone" class="meterZone"></div>
         <div id="meterTicks" class="meterTicks"></div>
@@ -87,7 +88,8 @@ export const HUD_HTML = `
         <div id="meterImpact" class="meterImpact"></div>
         <div id="meterCursor" class="meterCursor"></div>
       </div>
-      <div class="meterRow"><b id="meterLabel">Tap to swing</b><span id="meterCarry"></span></div>
+      <button id="meterSwing" class="meterSwing" aria-describedby="meterSteps meterLabel">SWING</button>
+      <div id="meterSteps" class="meterSteps"><span>HOLD FOR POWER</span><i> → </i><span>RELEASE</span><i> → </i><span>TAP ON THE MARK</span></div>
       <button id="meterCancel" class="meterCancel hidden" aria-label="Cancel swing">${ICONS.close}</button>
     </div>
     <div id="tapPad" class="tapPad hidden">
@@ -149,7 +151,7 @@ export const HUD_HTML = `
       <h2><button class="iconBtn back" data-back aria-label="Back">${ICONS.back}</button>Settings</h2>
       <label class="row"><span>Sound</span><input id="setSfx" type="range" min="0" max="1" step="0.05" /></label>
       <label class="row"><span>Music</span><input id="setMusic" type="range" min="0" max="1" step="0.05" /></label>
-      <div class="row"><span>Swing</span><div class="seg" id="setSwing"><button data-v="meter">Meter</button><button data-v="drag">Pull</button><button data-v="tap">Buttons</button></div></div>
+      <div class="row"><span>Swing</span><div class="seg" id="setSwing"><button data-v="meter">Hold</button><button data-v="drag">Pull</button><button data-v="tap">Buttons</button></div></div>
       <div class="row"><span>Graphics</span><div class="seg" id="setQuality"><button data-v="auto">Auto</button><button data-v="low">Low</button><button data-v="medium">Med</button><button data-v="high">High</button></div></div>
       <label class="row"><span>Reduce motion</span><input id="setMotion" type="checkbox" class="toggle" /></label>
       <label class="row"><span>Vibration</span><input id="setHaptics" type="checkbox" class="toggle" /></label>

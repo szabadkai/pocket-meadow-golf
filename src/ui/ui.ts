@@ -2,7 +2,7 @@ import { HOLES } from '../course/holes';
 import type { Bests, Settings } from '../game/save';
 import type { CameraRig } from '../render/cameraRig';
 import type { ClubId } from '../sim/shot';
-import { METER, type MeterStage } from '../sim/meter';
+import { METER, accuracyWindow, type MeterStage } from '../sim/meter';
 import { HUD_HTML } from './markup';
 
 const SCREENS = ['scrTitle', 'scrPractice', 'scrSettings', 'scrPause', 'scrCard', 'scrHole', 'scrResults', 'scrLost', 'scrBasket', 'scrClub'];
@@ -68,16 +68,32 @@ export class UI {
     z.style[this.len] = `${this.meterX(METER.zone) - this.meterX(-METER.zone)}%`;
     this.$('meterImpact').style[this.pos] = `${this.meterX(0)}%`;
     const ticks = this.$('meterTicks');
-    ticks.innerHTML = [0.25, 0.5, 0.75, 1].map((t) => `<i style="${this.pos}:${this.meterX(t)}%"><span>${Math.round(t * 100)}</span></i>`).join('');
+    ticks.innerHTML = [0.25, 0.5, 0.75, 1]
+      .map((t) => `<i style="${this.pos}:${this.meterX(t)}%"><span>${Math.round(t * 100)}</span></i>`)
+      .join('');
   }
 
-  setMeter(stage: MeterStage, u: number, power: number, label: string, carry: string) {
+  setMeter(stage: MeterStage, u: number, power: number, label: string, carry: string, tolerance = accuracyWindow(power, false)) {
     this.layoutMeter();
-    const active = stage === 'power' || stage === 'accuracy';
+    const active = stage === 'power' || stage === 'pause' || stage === 'accuracy';
+    const zone = this.$('meterZone');
+    zone.style[this.pos] = `${this.meterX(-tolerance)}%`;
+    zone.style[this.len] = `${this.meterX(tolerance) - this.meterX(-tolerance)}%`;
+    this.$('meterPad').dataset.stage = stage;
+    this.$('meterSwing').textContent =
+      stage === 'accuracy'
+        ? label.startsWith('Release')
+          ? 'RELEASE FIRST'
+          : 'TAP ON THE MARK'
+        : stage === 'power'
+          ? 'RELEASE'
+          : stage === 'pause'
+            ? 'FULL POWER'
+            : 'SWING';
     this.$('meterPad').classList.toggle('active', active);
     this.$('meterCancel').classList.toggle('hidden', !active);
     const cur = this.$('meterCursor');
-    cur.style[this.pos] = `${this.meterX(stage === 'idle' ? 0 : u)}%`;
+    cur.style[this.pos] = `${this.meterX(stage === 'idle' ? 0 : Math.max(METER.start, Math.min(1, u)))}%`;
     cur.classList.toggle('hidden', stage === 'idle');
     const fill = this.$('meterFill');
     const top = stage === 'power' ? Math.max(0, u) : stage === 'idle' ? 0 : power;
@@ -139,6 +155,14 @@ export class UI {
     this.$('meterPad').classList.toggle('disabled', v);
   }
 
+  setSwingLocked(locked: boolean) {
+    this.clubButtons.forEach((button) => {
+      button.disabled = locked;
+    });
+    this.$('aimStrip').setAttribute('aria-disabled', String(locked));
+    for (const id of ['aimLeft', 'aimRight']) (this.$(id) as HTMLButtonElement).disabled = locked;
+  }
+
   setSwingMode(mode: 'meter' | 'drag' | 'tap') {
     this.$('meterPad').classList.toggle('hidden', mode !== 'meter');
     this.$('pad').classList.toggle('hidden', mode !== 'drag');
@@ -157,7 +181,17 @@ export class UI {
     for (const b of this.clubButtons) b.setAttribute('aria-checked', String(b.dataset.club === c));
   }
 
-  setHudText(t: { hole: string; name: string; par: string; stroke: string; total: string; pin: string; lie: string; lieBad: boolean; wind: number }) {
+  setHudText(t: {
+    hole: string;
+    name: string;
+    par: string;
+    stroke: string;
+    total: string;
+    pin: string;
+    lie: string;
+    lieBad: boolean;
+    wind: number;
+  }) {
     this.$('hudHole').textContent = t.hole;
     this.$('hudName').textContent = t.name;
     this.$('hudPar').textContent = t.par;

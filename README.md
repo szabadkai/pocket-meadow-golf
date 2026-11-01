@@ -26,7 +26,7 @@ Everything works with one thumb. There's no keyboard, hover, right-click or prec
 | --- | --- |
 | **Aim** | Drag left/right on the aim bar (or anywhere on the course). Slow drags are fine, quick flicks turn further. The ◀ ▶ buttons nudge by ¼° and repeat when held. On the green, aiming is extra fine. |
 | **Club** | Big buttons: Driver · Iron · Wedge · Putter. The game picks a sensible club after each shot. |
-| **Swing (default: classic meter)** | Tap the meter once to start the swing. The marker climbs, so **tap again to set power**. It then races back: **tap when it crosses the dark impact line** to set direction. On the line is dead straight. Early pulls left, late pushes right, up to 4° inside the white zone. Missing the zone is a mishit: up to 12° off line and 15% less power. If you never tap a second time you get full power; if you never tap the third time it's a late mishit. ✕ cancels mid-swing. Live carry shows beside the meter, and the golfer's backswing follows the marker. Putts use a slower marker and smaller errors. In landscape the meter stands upright in the side column. Space works as a tap on desktop. |
+| **Swing (default: Hold)** | **Hold SWING** to build power, **release** to lock it, then **press SWING again on the green mark** to lock accuracy. The meter stays above your thumb. Every shot gets a full-length return with 2.17 seconds to the mark at a constant speed. The green zone is dead straight; lighter shots and putting have wider zones. Early pulls left, late pushes right, smoothly up to 12° (4.2° for putts). Full power pauses for 320 ms, then returns automatically; if still holding, lift before a fresh accuracy press. Missing the return resolves one capped mishit. ✕ cancels without a stroke. Aim and clubs lock during the swing. The golfer holds the backswing until accuracy is locked. Mouse and Space use the same hold–release–press sequence. |
 | **Pull swing** (Settings → Swing → *Pull*) | Touch the green swing pad and **pull down**. Power and predicted carry show in a bubble above your finger, and the landing marker moves live. **Release to hit.** Slide back above where you touched (or let the gesture be interrupted) to **cancel**. Full power is about 95–150 px of thumb travel, depending on screen size. |
 | **Button swing** (Settings → Swing → *Buttons*) | − / + set power in 5% steps (hold to repeat), then press **Swing**. |
 | **Look** (free camera) | Opens on the whole hole. Then **drag** to pan, **pinch** or **+ / −** to zoom (mouse wheel on desktop), and **twist two fingers** to rotate. The aim bar still aims, and your view stays where you left it. **Back** returns to the shot camera. |
@@ -93,7 +93,7 @@ The game saves to `localStorage` automatically after every resolved shot, at hol
 | Basket items, their physics and the twice-a-round schedule | `src/sim/items.ts`; spin in `launch()` in `src/sim/shot.ts` |
 | Stars, errand rules, club projects, cap/scarf unlock thresholds | `src/game/club.ts` |
 | Camera pitch, smoothing, framing paddings | `src/render/cameraRig.ts`, `frame*` methods in `src/game/game.ts` |
-| Swing meter speeds, zone widths, hook/push angles, mishit penalty | `METER` in `src/sim/meter.ts` |
+| Hold charge speed, full-power pause, return speed, power-scaled accuracy zones, pull/push angles, mishit penalty | `METER` in `src/sim/meter.ts` |
 | Thumb travel for full power, aim sensitivity, look gestures | `travel()`, `bindAim`, `bindLook` in `src/input/controls.ts` |
 | Render quality tiers (DPR cap, pixel budget, terrain detail) | `QUALITY` in `src/render/scene.ts` |
 | Colours, cel ramp, outlines | `src/render/materials.ts` |
@@ -111,7 +111,7 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 
 ## Testing done (and how)
 
-- **Automated** (`npm test`, 76 tests): spin roll-out, every basket item, sheep and mole bounces, per-round moles, errand completion and failure, star scoring, and projects changing the course; the swing meter's power setting, straight/early/late/mishit grading, auto-finish and cancel; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
+- **Automated** (`npm test`, 85 tests): spin roll-out, every basket item, sheep and mole bounces, per-round moles, errand completion and failure, star scoring, and projects changing the course; the swing meter’s hold/release power locking, constant return timing, power-scaled straight zones, maximum-power release gate, deterministic early/late grading, timeout and cancellation; pointer capture, multiple touches, synthetic clicks, lost capture, right-click filtering and the Space-key sequence; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
   - a search bot proves each hole is completable within par+1 at maximum head- and crosswind;
   - a straightforward bot (default aim, power = distance ÷ club range, no wind compensation) must finish within par+3.
 - **Desktop browser with mobile emulation** (375×812 portrait and 812×375 landscape, via the built-in browser): played hole 1 end to end with real drags on the swing pad (drive → wedge → putt → birdie), checked every hole's overview, a water penalty with the island drop zone, tap-swing mode, the round-complete screen and best score, resume after reload, simulated tab hide/show mid-flight (the simulation pauses and resumes without jumping), forced WebGL context loss and restore, and that audio starts only after a real tap.
@@ -121,10 +121,18 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 
 - **Not tested on a physical phone.** Touch feel, haptics, real GPU performance on older Android devices, and iOS toolbar collapse during play were checked only in emulation or the simulator. Please try it on a real device.
 - Audio is synthesized (WebAudio oscillators and noise). It's charming but simple, and I could only check that it runs without errors, not how it sounds on phone speakers.
-- No spin control, no shot shaping (draw/fade), no elevation number in the HUD. Elevation shows through toon shading and in the landing preview.
+- No shot shaping (draw/fade), no elevation number in the HUD. Elevation shows through toon shading and in the landing preview.
 - Animals are decorative and don't move around the course. Trees, the windmill and OOB stakes are the only physical obstacles; bridges and props are visual only.
 - The bots show scoring is generous for precise players (a precise simulated human averages around 32 on the par 35), by design for arcade play.
 - Two tabs open at once share one save, and whichever writes last wins.
 - Spin, items, errands, restoration and the rescue were tested in desktop emulation only: scripted shots plus screenshots.
 - Practice rounds aren't saved for resuming (your main round's save is never overwritten by practice).
 - Dev-only URL hooks (`?hole=3`, `&swing=0.8`) exist for automated checks and are disabled in production builds.
+
+## GitHub Pages
+
+Live game: https://szabadkai.github.io/pocket-meadow-golf/
+
+Pushing `main` runs `.github/workflows/deploy.yml`: clean install, the full test suite, a TypeScript/Vite build, then deployment of `dist/` to GitHub Pages. The relative Vite base keeps assets working at the repository URL. Failed tests prevent deployment.
+
+The hold-swing update has automated state-machine and actual input-handler regression tests in `tests/meter.test.ts` and `tests/controls.test.ts`. `tests/viewports.html` is a development-only portrait/landscape fixture. Physical phone touch and haptics still need real-device testing.

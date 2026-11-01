@@ -14,8 +14,9 @@ export interface ControlHandlers {
   swingCancel(): void;
   tapPowerChanged(power: number): void;
   tapSwing(power: number): void;
-  /** Swing meter: each tap advances start → power → direction. */
-  meterTap(): void;
+  /** Hold/release builds power; a fresh press on the return sets accuracy. */
+  meterPress(): void;
+  meterRelease(): void;
   meterCancel(): void;
   /** Free-look camera mode is on: course drags move the camera instead of aiming. */
   lookActive(): boolean;
@@ -41,6 +42,8 @@ export class Controls {
   private aimLastT = 0;
   private aimMoved = 0;
   private swingPointer = -1;
+  private meterPointer = -1;
+  private meterKeyHeld = false;
   private swingStartX = 0;
   private swingStartY = 0;
   private swingPower = 0;
@@ -61,14 +64,14 @@ export class Controls {
       pMinus: HTMLElement;
       pPlus: HTMLElement;
       tapSwing: HTMLElement;
-      meterPad: HTMLElement;
+      meterButton: HTMLElement;
       meterCancel: HTMLElement;
     },
   ) {
     // Look must be bound before aim on the course so it can claim gestures first.
     this.bindLook(els.course);
     this.bindAim(els.aimStrip, 1);
-    this.bindMeter(els.meterPad, els.meterCancel);
+    this.bindMeter(els.meterButton, els.meterCancel);
     this.bindAim(els.course, 1);
     this.bindNudge(els.aimLeft, -1);
     this.bindNudge(els.aimRight, 1);
@@ -83,10 +86,18 @@ export class Controls {
     window.addEventListener('keydown', (e) => {
       if (e.key === 'ArrowLeft' && h.canAim()) h.aimBy(-0.5 * DEG * h.aimFineness());
       if (e.key === 'ArrowRight' && h.canAim()) h.aimBy(0.5 * DEG * h.aimFineness());
-      if (e.key === ' ' && !e.repeat) {
+      if (e.code === 'Space' && !e.repeat && !this.meterKeyHeld && this.meterPointer === -1) {
+        if ((e.target as HTMLElement).closest('input, select, textarea, button') && e.target !== els.meterButton) return;
         e.preventDefault();
-        h.meterTap();
+        this.meterKeyHeld = true;
+        h.meterPress();
       }
+    });
+    window.addEventListener('keyup', (e) => {
+      if (e.code !== 'Space' || !this.meterKeyHeld) return;
+      e.preventDefault();
+      this.meterKeyHeld = false;
+      h.meterRelease();
     });
   }
 
@@ -157,18 +168,41 @@ export class Controls {
     el.addEventListener('lostpointercapture', end);
   }
 
-  /** Timing taps register on pointerdown (no click delay), anywhere on the big meter pad. */
+  /** Pointer-down commits accuracy; clicks are never used for swing input. */
   private bindMeter(el: HTMLElement, cancel: HTMLElement) {
     el.addEventListener('pointerdown', (e) => {
-      this.h.interacted();
-      if ((e.target as HTMLElement).closest('.meterCancel')) return;
+      if (e.button !== 0 || this.meterPointer !== -1 || this.meterKeyHeld) return;
       e.preventDefault();
-      this.h.meterTap();
+      this.h.interacted();
+      this.meterPointer = e.pointerId;
+      try {
+        el.setPointerCapture(e.pointerId);
+      } catch {
+        /* unsupported capture */
+      }
+      this.h.meterPress();
     });
+    el.addEventListener('pointerup', (e) => {
+      if (e.pointerId !== this.meterPointer) return;
+      e.preventDefault();
+      this.meterPointer = -1;
+      this.h.meterRelease();
+    });
+    const abort = (e: PointerEvent) => {
+      if (e.pointerId !== this.meterPointer) return;
+      this.meterPointer = -1;
+      this.h.meterCancel();
+    };
+    el.addEventListener('pointercancel', abort);
+    el.addEventListener('lostpointercapture', abort);
     cancel.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      this.meterPointer = -1;
+      this.meterKeyHeld = false;
       this.h.meterCancel();
     });
+    // Preserve keyboard access to the separate Cancel button.
+    cancel.addEventListener('click', () => this.h.meterCancel());
   }
 
   private lookPts = new Map<number, { x: number; y: number }>();
@@ -340,6 +374,9 @@ export class Controls {
 
   /** Abort any gesture in progress (tab hidden, menu opened, etc.). */
   cancelAll() {
+    this.meterPointer = -1;
+    this.meterKeyHeld = false;
+    this.h.meterCancel();
     this.lookPts.clear();
     if (this.steerPointer !== -1) {
       this.steerPointer = -1;

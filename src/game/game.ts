@@ -127,7 +127,7 @@ export class Game {
       pMinus: this.ui.$('pMinus'),
       pPlus: this.ui.$('pPlus'),
       tapSwing: this.ui.$('tapSwing'),
-      meterPad: this.ui.$('meterPad'),
+      meterButton: this.ui.$('meterSwing'),
       meterCancel: this.ui.$('meterCancel'),
     });
     this.bindUI();
@@ -267,7 +267,8 @@ export class Game {
     return {
       canAim: () => this.canAim(),
       canSwing: () => this.canAim(),
-      meterTap: () => this.meterTap(),
+      meterPress: () => this.meterPress(),
+      meterRelease: () => this.meterRelease(),
       meterCancel: () => this.cancelMeter(),
       lookActive: () => this.overview && this.phase === 'aim',
       lookPan: (dx: number, dy: number) => {
@@ -358,11 +359,12 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ swing meter
-  private meterTap() {
+  private meterPress() {
     if (this.phase !== 'aim' || this.paused || this.store.settings.swingMode !== 'meter') return;
     this.wake(3);
     if (!this.meter.active) {
       this.meter.start(this.club === 'putter');
+      this.ui.setSwingLocked(true);
       this.pulling = true;
       this.pullPower = 0;
       this.ui.hideSpeech();
@@ -370,23 +372,29 @@ export class Game {
       if (this.tutorialStep >= 0 && this.tutorialStep <= 2) this.ui.hideSpeech();
       return;
     }
-    const wasPower = this.meter.stage === 'power';
     const r = this.meter.tap();
+    if (r) this.fireMeter(r);
+  }
+
+  private meterRelease() {
+    const wasPower = this.meter.stage === 'power';
+    this.meter.release();
     if (wasPower) {
       this.audio.tick(this.meter.power);
       if (this.store.settings.haptics) navigator.vibrate?.(8);
     }
-    if (r) this.fireMeter(r);
+    this.wake(3);
   }
 
   private cancelMeter() {
     if (!this.meter.active) return;
     this.meter.cancel();
+    this.ui.setSwingLocked(false);
     this.pulling = false;
     this.pullPower = 0;
     this.predDirty = true;
     this.r.golfer.setSwing(0);
-    this.ui.setMeter('idle', 0, 0, 'Tap to swing', '');
+    this.ui.setMeter('idle', 0, 0, 'Hold for power', '');
     this.wake();
   }
 
@@ -398,12 +406,12 @@ export class Game {
     const side = r.degrees < 0 ? 'left' : 'right';
     const msg =
       r.grade === 'perfect'
-        ? 'Perfect strike!'
+        ? 'Perfect!'
         : r.grade === 'good'
           ? 'Nice and straight.'
           : r.grade === 'mishit'
             ? `Mishit! ${Math.round(deg)}° ${side}`
-            : `${r.grade === 'early' ? 'Early' : 'Late'}: ${Math.round(deg)}° ${side}`;
+            : `${r.grade === 'early' ? 'Early — pull' : 'Late — push'} · ${Math.round(deg)}° ${side}`;
     this.ui.setMeter('done', r.offset, this.meter.power, msg, '');
     const perfect = r.grade === 'perfect';
     // A perfect strike flies a little further: a visible reward, not a hidden roll.
@@ -414,7 +422,6 @@ export class Game {
       this.audio.chirp();
     } else this.ui.say(msg, 1300);
   }
-
 
   private wake(sec = 2.5) {
     this.activeUntil = Math.max(this.activeUntil, this.time + sec);
@@ -595,7 +602,8 @@ export class Game {
     this.pullPower = 0;
     this.pulling = false;
     this.meter.cancel();
-    this.ui.setMeter('idle', 0, 0, 'Tap to swing', '');
+    this.ui.setSwingLocked(false);
+    this.ui.setMeter('idle', 0, 0, 'Hold for power', '');
     this.r.golfer.setSwing(0);
     this.predDirty = true;
     this.r.effects.slopeVisible = this.lie === Surface.Green || this.club === 'putter';
@@ -668,7 +676,7 @@ export class Game {
     this.shotClub = this.club;
     this.phase = 'swing';
     this.phaseT = 0;
-    this.swingFrom = this.store.settings.swingMode === 'drag' ? -power : 0;
+    this.swingFrom = this.store.settings.swingMode === 'tap' ? 0 : -power;
     this.launched = false;
     this.overview = false;
     this.ui.setOverview(false);
@@ -1233,6 +1241,7 @@ export class Game {
   }
 
   private onContextLost() {
+    this.controls.cancelAll();
     this.ui.show('scrLost');
   }
 
@@ -1246,6 +1255,8 @@ export class Game {
 
   // ------------------------------------------------------------------ camera
   layout() {
+    // Resize and rotation interrupt uncommitted gestures without a stroke.
+    this.controls.cancelAll();
     const vv = window.visualViewport;
     const h = vv ? vv.height : window.innerHeight;
     document.documentElement.style.setProperty('--app-h', `${Math.round(h)}px`);
@@ -1259,7 +1270,7 @@ export class Game {
       this.r.rig.rect = { x: 0, y: 0, w: ar.width, h: ar.height };
     }
     // Orientation may flip the meter between horizontal and upright.
-    if (!this.meter.active) this.ui.setMeter('idle', 0, 0, 'Tap to swing', '');
+    if (!this.meter.active) this.ui.setMeter('idle', 0, 0, 'Hold for power', '');
     this.reframe();
     this.r.rig.snap();
     this.r.rig.apply();
@@ -1483,7 +1494,7 @@ export class Game {
       {
         t:
           this.store.settings.swingMode === 'meter'
-            ? 'Tap the swing meter to start. Tap again to set power, then tap when the marker comes back to the line. Early pulls left, late pushes right!'
+            ? 'Hold SWING to build power, then release. Tap SWING again when the returning marker reaches the green mark. Early pulls left; late pushes right!'
             : this.store.settings.swingMode === 'tap'
               ? 'Set power with − and +, then press Swing!'
               : 'Now pull down on the green swing pad. Further = more power. Slide back up to cancel, let go to hit!',
@@ -1584,11 +1595,25 @@ export class Game {
           const m = this.meter;
           this.pullPower = m.stage === 'power' ? Math.max(0, m.u) : m.power;
           this.predDirty = true;
-          // The golfer's club follows the marker: up with power, down to impact on the way back.
-          this.r.golfer.setSwing(-Math.max(0, Math.min(m.stage === 'power' ? m.u : m.power, m.u)));
+          // Hold the backswing pose until the accuracy press commits the downswing.
+          this.r.golfer.setSwing(-this.pullPower);
           if (m.active) {
-            const label = m.stage === 'power' ? 'Tap to set power' : 'Tap on the line!';
-            this.ui.setMeter(m.stage, m.u, m.power, label, `${Math.round(this.pullPower * 100)}% · ${this.carryLabel(this.pullPower)}`);
+            const label =
+              m.stage === 'power'
+                ? 'Release to lock power'
+                : m.stage === 'pause'
+                  ? 'Full power · get ready'
+                  : m.armed
+                    ? 'Tap on the green mark!'
+                    : 'Release, then tap';
+            this.ui.setMeter(
+              m.stage,
+              m.u,
+              m.power,
+              label,
+              `${Math.round(this.pullPower * 100)}% · ${this.carryLabel(this.pullPower)}`,
+              m.tolerance,
+            );
           }
           if (r) this.fireMeter(r);
           this.wake(0.5);
@@ -1597,8 +1622,8 @@ export class Game {
       case 'swing': {
         const tap = this.store.settings.swingMode === 'tap';
         const back = tap ? 0.28 : 0;
-        // Meter swings already finished the downswing on the impact line.
-        const down = this.store.settings.swingMode === 'meter' ? 0.04 : 0.11;
+        // Accuracy is locked; now play the downswing into impact.
+        const down = this.store.settings.swingMode === 'meter' ? 0.16 : 0.11;
         const t = this.phaseT;
         if (t < back) this.r.golfer.setSwing((-t / back) * this.shotPower);
         else if (t < back + down) {

@@ -1,33 +1,31 @@
-// Classic three-tap swing meter: tap to start, tap to set power, tap on the impact line
-// as the marker returns. Timing error becomes a visible, deterministic hook or push.
-
-export type MeterStage = 'idle' | 'power' | 'accuracy' | 'done';
+// Hold for power, release to lock, then press on the returning accuracy mark.
+// This state machine owns timing; input adapters only forward press/release/cancel.
+export type MeterStage = 'idle' | 'power' | 'pause' | 'accuracy' | 'done';
 export type MeterGrade = 'perfect' | 'good' | 'early' | 'late' | 'mishit';
 
 export const METER = {
-  /** Far end of the return travel (left of the impact line). */
-  start: -0.14,
-  /** Half-width of the dead-straight window around the impact line. */
-  perfect: 0.012,
-  /** Half-width of the accuracy zone drawn on the bar. */
-  zone: 0.06,
-  /** Bar units per second on the way up (0 → 100% power). */
-  powerSpeed: 0.85,
-  /** Bar units per second on the way back. */
-  returnSpeed: 1.15,
-  /** Direction error at the edge of the zone, and the worst case beyond it. */
+  start: -0.16,
+  perfect: 0.035,
+  softPerfect: 0.07,
+  putterPerfect: 0.085,
+  zone: 0.14,
+  powerSpeed: 0.48,
+  returnSpeed: 0.46,
+  fullPause: 0.32,
   zoneDeg: 4,
   maxDeg: 12,
-  /** Power kept on a mishit outside the zone. */
   missPower: 0.85,
-  /** Putts are gentler: slower marker and smaller direction errors. */
-  putterSpeed: 0.7,
+  putterSpeed: 0.8,
   putterScale: 0.35,
 };
 
+export function accuracyWindow(power: number, putter: boolean): number {
+  return putter ? METER.putterPerfect : METER.softPerfect + (METER.perfect - METER.softPerfect) * Math.max(0, Math.min(1, power));
+}
+
 export interface MeterResult {
   power: number;
-  /** Added to the aim yaw: negative = left (early), positive = right (late). */
+  /** Negative = left (early), positive = right (late). */
   yawErr: number;
   grade: MeterGrade;
   /** Signed timing offset from the impact line (positive = early). */
@@ -35,83 +33,129 @@ export interface MeterResult {
   degrees: number;
 }
 
-export function gradeOffset(offset: number, putter: boolean): { yawErr: number; powerMul: number; grade: MeterGrade; degrees: number } {
+export function gradeOffset(
+  offset: number,
+  putter: boolean,
+  power = 1,
+): { yawErr: number; powerMul: number; grade: MeterGrade; degrees: number } {
   const a = Math.abs(offset);
   const side = offset > 0 ? -1 : 1;
+  const perfect = accuracyWindow(power, putter);
   let deg = 0;
   let powerMul = 1;
   let grade: MeterGrade = 'perfect';
-  if (a > METER.perfect && a <= METER.zone) {
-    deg = (METER.zoneDeg * (a - METER.perfect)) / (METER.zone - METER.perfect);
-    grade = deg < 1.5 ? 'good' : offset > 0 ? 'early' : 'late';
+  if (a > perfect && a <= METER.zone) {
+    deg = (METER.zoneDeg * (a - perfect)) / (METER.zone - perfect);
+    grade = offset > 0 ? 'early' : 'late';
   } else if (a > METER.zone) {
-    const t = Math.min(1, (a - METER.zone) / (Math.abs(METER.start) - METER.zone));
+    const t = Math.min(1, (a - METER.zone) / 0.2);
     deg = METER.zoneDeg + (METER.maxDeg - METER.zoneDeg) * t;
-    powerMul = METER.missPower;
+    powerMul = 1 - (1 - METER.missPower) * t;
     grade = 'mishit';
   }
   if (putter) deg *= METER.putterScale;
-  return { yawErr: (side * deg * Math.PI) / 180, powerMul, grade, degrees: side * deg };
+  const degrees = deg === 0 ? 0 : side * deg;
+  return { yawErr: (degrees * Math.PI) / 180, powerMul, grade, degrees };
 }
 
 export class SwingMeter {
   stage: MeterStage = 'idle';
-  /** Marker position: 0 = impact line, 1 = full power. */
+  /** 0 = accuracy mark, 1 = full power / start of the accuracy pass. */
   u = 0;
   power = 0;
   result: MeterResult | null = null;
+  held = false;
+  armed = false;
   private putter = false;
+  private pauseLeft = 0;
 
   get active(): boolean {
-    return this.stage === 'power' || this.stage === 'accuracy';
+    return this.stage === 'power' || this.stage === 'pause' || this.stage === 'accuracy';
+  }
+  get tolerance(): number {
+    return accuracyWindow(this.stage === 'power' ? this.u : this.power, this.putter);
   }
 
   start(putter: boolean) {
+    if (this.active) return;
     this.stage = 'power';
     this.putter = putter;
     this.u = 0;
     this.power = 0;
     this.result = null;
+    this.held = true;
+    this.armed = false;
+    this.pauseLeft = 0;
   }
 
-  /** Returns the result on the final tap, otherwise null. */
-  tap(): MeterResult | null {
+  /** A release only locks power or arms a fresh accuracy press. It never hits. */
+  release() {
+    if (!this.held) return;
+    this.held = false;
     if (this.stage === 'power') {
       this.power = Math.max(0.02, Math.min(1, this.u));
-      this.stage = 'accuracy';
-      return null;
-    }
-    if (this.stage === 'accuracy') return this.finish(this.u);
-    return null;
+      this.beginReturn();
+    } else if (this.stage === 'accuracy') this.armed = true;
   }
 
-  /** Advances the marker. Returns a result if the marker ran out (automatic mishit). */
+  tap(): MeterResult | null {
+    if (this.stage !== 'accuracy' || !this.armed || this.held) return null;
+    return this.finish(this.u);
+  }
+
+  /** Returns one capped mishit if the player misses the pass, even while holding. */
   update(dt: number): MeterResult | null {
-    const k = this.putter ? METER.putterSpeed : 1;
+    if (!Number.isFinite(dt) || dt <= 0) return null;
+    const speed = METER.powerSpeed * (this.putter ? METER.putterSpeed : 1);
     if (this.stage === 'power') {
-      this.u += METER.powerSpeed * k * dt;
-      if (this.u >= 1) {
-        // Not stopped in time: full power, and the marker heads back.
-        this.u = 1;
-        this.power = 1;
-        this.stage = 'accuracy';
+      const toFull = (1 - this.u) / speed;
+      if (dt < toFull) {
+        this.u += speed * dt;
+        return null;
       }
-    } else if (this.stage === 'accuracy') {
-      this.u -= METER.returnSpeed * k * dt;
-      if (this.u <= METER.start) return this.finish(METER.start);
+      this.u = this.power = 1;
+      this.stage = 'pause';
+      this.pauseLeft = METER.fullPause;
+      dt -= toFull;
+    }
+    if (this.stage === 'pause') {
+      if (dt < this.pauseLeft) {
+        this.pauseLeft -= dt;
+        return null;
+      }
+      dt -= this.pauseLeft;
+      this.pauseLeft = 0;
+      this.beginReturn();
+    }
+    if (this.stage === 'accuracy') {
+      this.u -= METER.returnSpeed * dt;
+      if (this.u <= METER.start) {
+        this.u = METER.start;
+        // Timeout is explicitly a full, bounded mishit, independent of tolerance.
+        return this.finish(-0.34);
+      }
     }
     return null;
   }
 
   cancel() {
     this.stage = 'idle';
-    this.u = 0;
-    this.power = 0;
+    this.u = this.power = this.pauseLeft = 0;
+    this.held = this.armed = false;
+    this.result = null;
+  }
+
+  private beginReturn() {
+    this.stage = 'accuracy';
+    // A separate full-length pass gives even a tiny putt 2.17 seconds to the mark.
+    this.u = 1;
+    this.armed = !this.held;
   }
 
   private finish(offset: number): MeterResult {
-    const g = gradeOffset(offset, this.putter);
+    const g = gradeOffset(offset, this.putter, this.power);
     this.stage = 'done';
+    this.armed = false;
     this.result = { power: this.power * g.powerMul, yawErr: g.yawErr, grade: g.grade, offset, degrees: g.degrees };
     return this.result;
   }

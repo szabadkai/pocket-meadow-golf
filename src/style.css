@@ -13,7 +13,9 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --sal: env(safe-area-inset-left, 0px);
   --sar: env(safe-area-inset-right, 0px);
-  --font: ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Nunito', 'Varela Round', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font:
+    ui-rounded, 'SF Pro Rounded', 'Arial Rounded MT Bold', 'Nunito', 'Varela Round', system-ui, -apple-system, 'Segoe UI', Roboto,
+    sans-serif;
 }
 
 * {
@@ -501,7 +503,9 @@ button {
 .club[aria-checked='true'] {
   background: var(--butter);
   transform: translateY(2px);
-  box-shadow: 0 1px 0 rgba(59, 47, 42, 0.4), inset 0 0 0 2px #fff;
+  box-shadow:
+    0 1px 0 rgba(59, 47, 42, 0.4),
+    inset 0 0 0 2px #fff;
 }
 .club:disabled {
   opacity: 0.4;
@@ -710,7 +714,13 @@ button {
 .title {
   flex-direction: column;
   justify-content: space-between;
-  background: linear-gradient(180deg, rgba(191, 232, 247, 0.55), rgba(191, 232, 247, 0) 40%, rgba(59, 47, 42, 0) 60%, rgba(59, 47, 42, 0.25));
+  background: linear-gradient(
+    180deg,
+    rgba(191, 232, 247, 0.55),
+    rgba(191, 232, 247, 0) 40%,
+    rgba(59, 47, 42, 0) 60%,
+    rgba(59, 47, 42, 0.25)
+  );
 }
 .logo {
   text-align: center;
@@ -1331,7 +1341,9 @@ table.sc td.tot {
 }
 .modBtn.armed {
   background: var(--butter);
-  box-shadow: 0 0 0 3px #fff, 0 3px 0 rgba(59, 47, 42, 0.4);
+  box-shadow:
+    0 0 0 3px #fff,
+    0 3px 0 rgba(59, 47, 42, 0.4);
   animation: wiggle 1.2s ease-in-out infinite;
 }
 @keyframes wiggle {
@@ -1557,4 +1569,129 @@ table.sc td.tot {
 }
 .basketNote:empty {
   display: none;
+}
+
+/* Hold / release / tap: feedback sits above the thumb, with a stable meter width. */
+.meterPad {
+  height: 194px;
+  gap: 10px;
+  padding: 12px 14px;
+  cursor: default;
+}
+.meterRow {
+  min-height: 20px;
+  padding-right: 36px;
+}
+.meterRow b {
+  font-size: 12px;
+  padding: 0;
+  background: none;
+}
+.meterRow span {
+  font-size: 11px;
+  padding: 0;
+  background: none;
+  white-space: nowrap;
+}
+.meterBar {
+  height: 30px;
+  flex: none;
+  margin: 4px 0;
+}
+.meterPad.active .meterBar {
+  margin-right: 0;
+}
+.meterZone {
+  background: #358a5e;
+  border-color: #1c5539;
+  border-style: solid;
+}
+.meterImpact {
+  background: #122e21;
+  box-shadow: 0 0 0 1px #fff4dc;
+}
+.meterSwing {
+  min-height: 52px;
+  flex: 1;
+  width: 100%;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  background: #2f674b;
+  color: #fff4dc;
+  font-family: inherit;
+  line-height: 1.1;
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  box-shadow: 0 3px 0 var(--ink);
+  touch-action: none;
+}
+.meterSwing:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.meterSteps {
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  text-align: center;
+  white-space: nowrap;
+}
+.meterSteps i {
+  font-style: normal;
+  opacity: 0.6;
+}
+.meterPad[data-stage='power'] .meterSteps span:first-child,
+.meterPad[data-stage='accuracy'] .meterSteps span:last-child {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.meterCancel {
+  top: 1px;
+  right: 1px;
+  border: 0;
+  background: transparent;
+}
+.club:disabled,
+.aimBtn:disabled {
+  opacity: 0.55;
+}
+@media (orientation: portrait) and (max-height: 700px) {
+  .meterPad {
+    height: 178px;
+    gap: 7px;
+  }
+}
+.meterPad.vertical {
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  grid-template-rows: minmax(42px, auto) 1fr auto;
+  gap: 12px;
+  padding: 12px;
+}
+.meterPad.vertical .meterBar {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  width: 34px;
+  height: auto;
+  margin: 8px 0;
+}
+.meterPad.vertical .meterRow {
+  grid-column: 2;
+  grid-row: 1;
+  gap: 6px;
+  padding: 24px 0 0;
+  justify-content: start;
+}
+.meterPad.vertical .meterSwing {
+  grid-column: 2;
+  grid-row: 2;
+  min-height: 52px;
+  font-size: 14px;
+}
+.meterPad.vertical .meterSteps {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  white-space: normal;
+  font-size: 8px;
 }
