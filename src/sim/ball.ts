@@ -12,7 +12,8 @@ import {
   WIND_ACCEL,
   type SurfaceId,
 } from './constants';
-import type { GroundModel } from './world';
+import { NO_MODS, type ShotMods } from './items';
+import type { Collider, GroundModel } from './world';
 
 export const BallState = { Rest: 0, Air: 1, Roll: 2, Holed: 3, Water: 4, OOB: 5 } as const;
 export type BallStateId = (typeof BallState)[keyof typeof BallState];
@@ -26,6 +27,7 @@ export const SimEvent = {
   Cup: 5,
   Lip: 6,
   Rest: 7,
+  Skip: 8,
 } as const;
 export type SimEventId = (typeof SimEvent)[keyof typeof SimEvent];
 
@@ -61,6 +63,15 @@ export class BallSim {
   /** Prediction mode: stop at the first ground contact. */
   stopAtFirstContact = false;
   listener: SimListener | null = null;
+  /** Item / spin modifiers for the current shot. */
+  mods: ShotMods = { ...NO_MODS };
+  /** Backspin: fraction of landing speed that pulls the ball back after the first bounce. */
+  checkBack = 0;
+  /** Bumblebee steering input, world-space acceleration. */
+  steerX = 0;
+  steerZ = 0;
+  skips = 0;
+  lastHit: Collider | null = null;
   private inCupZone = false;
 
   constructor(public ground: GroundModel) {}
@@ -81,6 +92,9 @@ export class BallSim {
     this.landed = false;
     this.hitObstacle = false;
     this.inCupZone = false;
+    this.skips = 0;
+    this.lastHit = null;
+    this.steerX = this.steerZ = 0;
     this.lastDryX = this.x;
     this.lastDryZ = this.z;
   }
@@ -135,9 +149,10 @@ export class BallSim {
 
   private stepAir(dt: number) {
     const g = this.ground;
-    this.vx += (-AIR_DRAG * this.vx + WIND_ACCEL * this.windX) * dt;
-    this.vz += (-AIR_DRAG * this.vz + WIND_ACCEL * this.windZ) * dt;
-    this.vy += (-GRAVITY - AIR_DRAG * this.vy) * dt;
+    const wa = WIND_ACCEL * this.mods.windMul;
+    this.vx += (-AIR_DRAG * this.vx + wa * this.windX + this.steerX) * dt;
+    this.vz += (-AIR_DRAG * this.vz + wa * this.windZ + this.steerZ) * dt;
+    this.vy += (-GRAVITY * this.mods.gravityMul - AIR_DRAG * this.vy) * dt;
     let nx = this.x + this.vx * dt;
     let ny = this.y + this.vy * dt;
     let nz = this.z + this.vz * dt;
@@ -166,10 +181,12 @@ export class BallSim {
           this.vx *= c.damp;
           this.vy *= c.damp;
           this.vz *= c.damp;
+          if (c.boost) this.vy = Math.max(this.vy, 0) + c.boost;
           nx = c.x + nX * rr;
           ny = c.y + nY * rr;
           nz = c.z + nZ * rr;
           this.hitObstacle = true;
+          this.lastHit = c;
           this.emit(SimEvent.Collide, Surface.Rough, Math.abs(vn));
         }
       } else if (ny > c.y0 && ny < c.y1) {
@@ -191,6 +208,7 @@ export class BallSim {
           nx = c.x + nX * rr;
           nz = c.z + nZ * rr;
           this.hitObstacle = true;
+          this.lastHit = c;
           this.emit(SimEvent.Collide, Surface.Rough, Math.abs(vn));
         }
       }
@@ -261,6 +279,16 @@ export class BallSim {
       this.state = BallState.Rest;
       return;
     }
+    // Acorn: a fast, shallow ball skips off the water like a stone.
+    if (surface === Surface.Water && this.mods.skip && this.skips < 4 && hs > 9 && -this.vy < hs * 0.75) {
+      this.skips++;
+      this.vy = Math.abs(this.vy) * 0.6 + 2;
+      this.vx *= 0.82;
+      this.vz *= 0.82;
+      this.y += 0.05;
+      this.emit(SimEvent.Skip, surface, hs);
+      return;
+    }
     if (surface === Surface.Water) {
       this.vx = this.vy = this.vz = 0;
       this.state = BallState.Water;
@@ -292,12 +320,24 @@ export class BallSim {
     let tx = this.vx - vn * nX;
     let ty = this.vy - vn * nY;
     let tz = this.vz - vn * nZ;
+    // Jam sandwich: stops dead where it first lands.
+    if (this.mods.sticky) {
+      this.vx = this.vy = this.vz = 0;
+      this.bounces++;
+      this.emit(firstContact ? SimEvent.Land : SimEvent.Bounce, surface, Math.abs(vn));
+      this.state = BallState.Rest;
+      this.emit(SimEvent.Rest, surface, 0);
+      return;
+    }
     const p = SURFACES[surface];
-    const retain = this.bounces === 0 ? p.retain * this.spin : 1 - (1 - p.retain) * 0.35;
-    tx *= retain;
-    ty *= retain;
-    tz *= retain;
-    const out = -vn * p.bounce;
+    const first = this.bounces === 0;
+    const retain = first ? Math.min(0.92, p.retain * this.spin) : 1 - (1 - p.retain) * 0.35;
+    // Backspin bites: the ball checks and can even spin back toward the golfer.
+    const back = first ? this.checkBack * (surface === Surface.Green ? 1 : 0.5) : 0;
+    tx *= retain - back;
+    ty *= retain - back;
+    tz *= retain - back;
+    const out = -vn * Math.min(0.75, p.bounce * this.mods.bounceMul);
     this.bounces++;
     this.emit(firstContact ? SimEvent.Land : SimEvent.Bounce, surface, Math.abs(vn));
     if (out < ROLL_THRESHOLD) {
@@ -340,7 +380,7 @@ export class BallSim {
     }
     const p = SURFACES[surface];
     g.slopeAt(this.x, this.z);
-    const k = 1 / (1 + g.gx * g.gx + g.gz * g.gz);
+    const k = this.mods.ignoreSlope ? 0 : 1 / (1 + g.gx * g.gx + g.gz * g.gz);
     const ax = -GRAVITY * g.gx * k;
     const az = -GRAVITY * g.gz * k;
     this.vx += ax * dt;
@@ -366,10 +406,25 @@ export class BallSim {
     let nx = this.x + this.vx * dt;
     let nz = this.z + this.vz * dt;
 
-    // Trunks and towers.
+    // Trunks and towers; mole hills pop a rolling ball back into the air.
     const cols = g.colliders;
     for (let i = 0; i < cols.length; i++) {
       const c = cols[i];
+      if (c.tag === 'mole') {
+        const d = Math.hypot(nx - c.x, nz - c.z);
+        if (d < c.r * 0.75 && sp > 1.5) {
+          this.x = nx;
+          this.z = nz;
+          this.y = g.heightAt(nx, nz) + BALL_RADIUS + 0.3;
+          this.vy = (c.boost ?? 4) * Math.min(1, sp / 8);
+          this.state = BallState.Air;
+          this.bounces = Math.max(1, this.bounces);
+          this.lastHit = c;
+          this.emit(SimEvent.Collide, surface, sp);
+          return;
+        }
+        continue;
+      }
       if (c.kind !== 1) continue;
       const dx = nx - c.x;
       const dz = nz - c.z;

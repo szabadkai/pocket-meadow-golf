@@ -30,10 +30,33 @@ Everything works with one thumb. There's no keyboard, hover, right-click or prec
 | **Pull swing** (Settings → Swing → *Pull*) | Touch the green swing pad and **pull down**. Power and predicted carry show in a bubble above your finger, and the landing marker moves live. **Release to hit.** Slide back above where you touched (or let the gesture be interrupted) to **cancel**. Full power is about 95–150 px of thumb travel, depending on screen size. |
 | **Button swing** (Settings → Swing → *Buttons*) | − / + set power in 5% steps (hold to repeat), then press **Swing**. |
 | **Look** (free camera) | Opens on the whole hole. Then **drag** to pan, **pinch** or **+ / −** to zoom (mouse wheel on desktop), and **twist two fingers** to rotate. The aim bar still aims, and your view stays where you left it. **Back** returns to the shot camera. |
+| **Spin** | The ● button (bottom-left of the course) cycles **No spin → Topspin ⤴ (runs out after landing) → Backspin ⤵ (bites, can check back)**. It resets after each shot. Putts have no spin. |
+| **Basket item** | Your snack from the picnic basket sits above the spin button. Tap it to arm it for the next shot; it's used up when you hit, otherwise it carries over to later holes. |
+| **Steer** (Bumblebee only) | While the ball flies, drag left/right on the course. |
 | **Skip** | Tap the course during a shot to fast-forward, or during a celebration to skip it. |
 | Desktop extras | Mouse works like a finger; ← → also aim. |
 
-There are no hidden random accuracy errors. Where the ball goes depends on aim, power, meter timing, club, lie, wind and terrain. The yellow dotted arc and ring show the **estimated first landing** from the same simulation the real shot uses. Roll after landing isn't shown, so judging it is part of the skill. Putts show a straight flat-green line, and the drifting arrows on the green show its slope.
+There are no hidden random accuracy errors. Where the ball goes depends on aim, power, meter timing, club, lie, spin, item, wind and terrain. The yellow dotted arc and ring show the **estimated first landing in calm air**, from the same simulation the real shot uses. Wind isn't included in the preview, so allowing for it is your call. The wind indicator and Pip's pre-shot read help. Roll after landing isn't shown, so judging it is part of the skill. Putts show a straight flat-green line, and the drifting arrows on the green show its slope.
+
+## The fun layer
+
+- **Feel**: a low side-on camera during flight so the arc reads, a beat of hit-stop and screen shake on big strikes, a flight whistle, and slow motion as a rolling ball reaches the cup. A **perfect** meter strike stamps PERFECT!, flies 6% further and leaves a gold trail. A hole-in-one sets off the whole meadow.
+- **Picnic basket**: the basket comes out **twice a round**, once on holes 1–4 and once on holes 5–9 (which holes varies by round). Pick one of two snacks and carry it until you use it on a shot; the second basket lets you swap or keep. The basket you see before hole 7 always offers an acorn for the ducks' errand. In practice, the basket only appears on hole 7. The snacks:
+  - 🥪 Jam sandwich sticks where it lands.
+  - 🎈 Balloon floats far and drifts 3× with the wind.
+  - 🌰 Acorn is bouncy and skips across water.
+  - 🐝 Bumblebee lets you steer in the air.
+  - 🐌 Snail ignores slopes while rolling.
+- **Errands**: each hole has one animal request (tap the errand chip to read it). Examples: stop by the bunny, carry the pond onto the green, knock an apple loose, avoid every biscuit bunker, bonk the windmill, bounce off a sheep, skip across the duck pond, take the picnic shortcut, finish with one putt.
+- **Stars**: up to three per hole (par, birdie, errand), 27 in all. Stars unlock cap colours for the golfer and scarves for Pip in **Club & Wardrobe** on the title screen. Practice rounds earn stars too.
+- **Restoring the club**: errands complete projects that change the course.
+  - Mend the bridge (the ducks' errand): the picnic shortcut on hole 8 becomes fairway.
+  - Get the windmill turning (hole 5): its sails start swatting balls.
+  - Plant flower beds (3 errands).
+  - Light the clubhouse lanterns (6 errands).
+  - Build Pip a nest (all 9): two rescues per round.
+- **Critters**: sheep are woolly trampolines. Two mole hills per round sit in the rough beside the fairway and pop balls into the air; they move each round. Ducks paddle away from splashes. A ball that stops beside an animal gets a boop.
+- **Pip's rescue**: once per round (twice with the nest), after a splash Pip offers to fetch the ball. You replay from your last spot and the splashed stroke doesn't count. You can take the normal drop instead.
 
 ## Rules (arcade, consistent)
 
@@ -66,7 +89,9 @@ The game saves to `localStorage` automatically after every resolved shot, at hol
 | Gravity, drag, wind strength, cup size/capture, stroke limit | `src/sim/constants.ts` |
 | Surface bounce/roll/friction (fairway, rough, green, sand) | `SURFACES` in `src/sim/constants.ts` |
 | Club carries, launch angles, spin; lie penalties | `CLUBS`, `lieMultiplier` in `src/sim/shot.ts` |
-| Hole layouts, pars, hazards, slopes, scenery, animals, wind ranges | `src/course/holes.ts` (pure data, design coordinates in yards) |
+| Hole layouts, pars, hazards, slopes, scenery, animals, wind ranges, errands | `src/course/holes.ts` (pure data, design coordinates in yards) |
+| Basket items, their physics and the twice-a-round schedule | `src/sim/items.ts`; spin in `launch()` in `src/sim/shot.ts` |
+| Stars, errand rules, club projects, cap/scarf unlock thresholds | `src/game/club.ts` |
 | Camera pitch, smoothing, framing paddings | `src/render/cameraRig.ts`, `frame*` methods in `src/game/game.ts` |
 | Swing meter speeds, zone widths, hook/push angles, mishit penalty | `METER` in `src/sim/meter.ts` |
 | Thumb travel for full power, aim sensitivity, look gestures | `travel()`, `bindAim`, `bindLook` in `src/input/controls.ts` |
@@ -86,7 +111,7 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 
 ## Testing done (and how)
 
-- **Automated** (`npm test`, 58 tests): the swing meter's power setting, straight/early/late/mishit grading, auto-finish and cancel; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
+- **Automated** (`npm test`, 76 tests): spin roll-out, every basket item, sheep and mole bounces, per-round moles, errand completion and failure, star scoring, and projects changing the course; the swing meter's power setting, straight/early/late/mishit grading, auto-finish and cancel; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
   - a search bot proves each hole is completable within par+1 at maximum head- and crosswind;
   - a straightforward bot (default aim, power = distance ÷ club range, no wind compensation) must finish within par+3.
 - **Desktop browser with mobile emulation** (375×812 portrait and 812×375 landscape, via the built-in browser): played hole 1 end to end with real drags on the swing pad (drive → wedge → putt → birdie), checked every hole's overview, a water penalty with the island drop zone, tap-swing mode, the round-complete screen and best score, resume after reload, simulated tab hide/show mid-flight (the simulation pauses and resumes without jumping), forced WebGL context loss and restore, and that audio starts only after a real tap.
@@ -99,5 +124,7 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 - No spin control, no shot shaping (draw/fade), no elevation number in the HUD. Elevation shows through toon shading and in the landing preview.
 - Animals are decorative and don't move around the course. Trees, the windmill and OOB stakes are the only physical obstacles; bridges and props are visual only.
 - The bots show scoring is generous for precise players (a precise simulated human averages around 32 on the par 35), by design for arcade play.
+- Two tabs open at once share one save, and whichever writes last wins.
+- Spin, items, errands, restoration and the rescue were tested in desktop emulation only: scripted shots plus screenshots.
 - Practice rounds aren't saved for resuming (your main round's save is never overwritten by practice).
 - Dev-only URL hooks (`?hole=3`, `&swing=0.8`) exist for automated checks and are disabled in production builds.

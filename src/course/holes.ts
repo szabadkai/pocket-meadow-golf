@@ -8,6 +8,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 1,
     name: 'First Flight',
+    errand: { who: 'bunny', text: 'Stop a ball close to me, by the green. I want a look!', kind: 'restNear', at: [-26, 238], r: 7 },
     par: 4,
     blurb: 'A wide, friendly fairway. Driver, then a little wedge.',
     tee: [0, 0],
@@ -44,6 +45,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 2,
     name: 'Puddle Jumper',
+    errand: { who: 'duck', text: 'Hop the whole pond: land on the green from the tee!', kind: 'greenFromTee' },
     par: 3,
     blurb: 'Carry the pond with an iron, or hop around it on the right.',
     tee: [0, 0],
@@ -83,6 +85,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 3,
     name: 'Apple Bend',
+    errand: { who: 'hedgehog', text: 'Knock an apple loose from the orchard for my lunch!', kind: 'hit', tag: 'apple' },
     par: 4,
     blurb: 'Doglegs left around the orchard. Cutting over the apple trees is bold.',
     tee: [0, 0],
@@ -134,6 +137,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 4,
     name: 'Biscuit Bunker',
+    errand: { who: 'hedgehog', text: 'Don’t touch a single biscuit all hole!', kind: 'noSand' },
     par: 3,
     blurb: 'A round green in a ring of biscuit bunkers. The front door is open.',
     tee: [0, 0],
@@ -174,6 +178,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 5,
     name: 'Windmill Walk',
+    errand: { who: 'sheep', text: 'Bonk a ball off the windmill. It might wake it up!', kind: 'hit', tag: 'windmill' },
     par: 5,
     blurb: 'Pass the windmill on the tight left or the roomy right.',
     tee: [0, 0],
@@ -225,6 +230,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 6,
     name: 'Clover Hill',
+    errand: { who: 'sheep', text: 'Bounce a ball off one of our woolly backs!', kind: 'hit', tag: 'sheep' },
     par: 4,
     blurb: 'Uphill all the way to a green tilted back to front. Club up!',
     tee: [0, 0],
@@ -261,6 +267,8 @@ export const HOLES: HoleDef[] = [
   {
     number: 7,
     name: 'Duck Crossing',
+    errand: { who: 'duck', text: 'Skip a ball across our pond, like a stone!', kind: 'skip' },
+    basketGuarantee: 'acorn',
     par: 3,
     blurb: 'An island green. The left shore is a safe place to lay up.',
     tee: [0, 0],
@@ -299,14 +307,16 @@ export const HOLES: HoleDef[] = [
   {
     number: 8,
     name: 'The Long Picnic',
+    errand: { who: 'hedgehog', text: 'Take the picnic shortcut: stop a ball past the brook on the path!', kind: 'restNear', at: [46, 302], r: 9 },
     par: 5,
     blurb: 'Curl right around the picnic, or thread the shortcut over the brook.',
     tee: [0, 0],
     pin: [74, 412],
     fairways: [
       { kind: 'path', pts: [[0, 14], [0, 100], [6, 175], [40, 235], [78, 300], [84, 360], [78, 392]], w: 40 },
-      { kind: 'path', pts: [[12, 205], [30, 258], [52, 318]], w: 15 },
     ],
+    // The picnic shortcut is only mown once the stone bridge is mended.
+    bonusFairways: [{ shape: { kind: 'path', pts: [[12, 205], [30, 258], [52, 318]], w: 15 }, requires: 'bridge' }],
     green: { kind: 'ellipse', c: [74, 410], r: [15, 13], rot: -0.2 },
     greenSlope: [-0.022, 0.016],
     bunkers: [
@@ -361,6 +371,7 @@ export const HOLES: HoleDef[] = [
   {
     number: 9,
     name: 'Clubhouse Sunset',
+    errand: { who: 'frog', text: 'Finish with one putt or fewer. Make it snappy!', kind: 'onePutt' },
     par: 4,
     blurb: 'Home to the clubhouse. Mind the pond short-left and the porch long-right.',
     tee: [0, 0],

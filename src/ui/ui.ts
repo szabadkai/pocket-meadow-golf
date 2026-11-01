@@ -5,7 +5,7 @@ import type { ClubId } from '../sim/shot';
 import { METER, type MeterStage } from '../sim/meter';
 import { HUD_HTML } from './markup';
 
-const SCREENS = ['scrTitle', 'scrPractice', 'scrSettings', 'scrPause', 'scrCard', 'scrHole', 'scrResults', 'scrLost'];
+const SCREENS = ['scrTitle', 'scrPractice', 'scrSettings', 'scrPause', 'scrCard', 'scrHole', 'scrResults', 'scrLost', 'scrBasket', 'scrClub'];
 
 /** Thin DOM layer: no game rules here, just showing state and forwarding taps. */
 export class UI {
@@ -36,6 +36,10 @@ export class UI {
     );
     this.bindSettings();
     this.layoutMeter();
+    this.$('errandChip').addEventListener('click', () => {
+      const t = this.$('errandChip').dataset.text;
+      if (t) this.say(t, 3200);
+    });
   }
 
   /** Bar position (%) for a meter value: impact line at 0, full power at 1. */
@@ -253,6 +257,7 @@ export class UI {
   }
 
   hideSpeech() {
+    this.$('pipChoice').classList.add('hidden');
     this.tutorialActive = false;
     this.speaking = false;
     this.$('pip').classList.add('hidden');
@@ -335,6 +340,158 @@ export class UI {
     this.$('resBest').textContent = bestLine;
     this.renderCard('resTable', scores, -1);
     this.show('scrResults');
+  }
+
+  // ---- shot modifiers, errands, stamps ----
+  setErrand(who: string, text: string, done: boolean, failed: boolean) {
+    const c = this.$('errandChip');
+    c.textContent = `${who} ${done ? 'Errand done ✓' : failed ? 'Errand missed' : 'Errand'}`;
+    c.classList.toggle('done', done);
+    c.classList.toggle('failed', failed && !done);
+    c.dataset.text = text;
+  }
+
+  setItem(emoji: string | null, name: string, armed: boolean) {
+    const b = this.$('itemBtn');
+    b.classList.toggle('hidden', !emoji);
+    b.classList.toggle('armed', armed);
+    this.$('itemEmoji').textContent = emoji ?? '';
+    this.$('itemLabel').textContent = armed ? 'Ready!' : name;
+  }
+
+  setSpin(spin: -1 | 0 | 1, visible: boolean) {
+    const b = this.$('spinBtn');
+    b.classList.toggle('hidden', !visible);
+    b.classList.toggle('armed', spin !== 0);
+    this.$('spinIcon').textContent = spin > 0 ? '⤴' : spin < 0 ? '⤵' : '●';
+    this.$('spinLabel').textContent = spin > 0 ? 'Topspin' : spin < 0 ? 'Backspin' : 'No spin';
+  }
+
+  private stampTimer = 0;
+  stamp(text: string, ms = 1300) {
+    const el = this.$('stamp');
+    el.textContent = text;
+    el.classList.remove('hidden');
+    // Restart the pop animation.
+    el.style.animation = 'none';
+    void el.offsetWidth;
+    el.style.animation = '';
+    window.clearTimeout(this.stampTimer);
+    this.stampTimer = window.setTimeout(() => el.classList.add('hidden'), ms);
+  }
+
+  flash() {
+    const f = this.$('flash');
+    f.classList.remove('go');
+    void f.offsetWidth;
+    f.classList.add('go');
+  }
+
+  /** Pip asks a two-way question in the speech bubble. */
+  choice(text: string, a: string, b: string, onA: () => void, onB: () => void) {
+    window.clearTimeout(this.speechTimer);
+    this.tutorialActive = true;
+    this.$('pipText').textContent = text;
+    this.$('pipBtns').classList.add('hidden');
+    const btns = this.$('pipChoice');
+    btns.classList.remove('hidden');
+    btns.innerHTML = '';
+    const mk = (label: string, cls: string, fn: () => void) => {
+      const el = document.createElement('button');
+      el.className = 'smallBtn ' + cls;
+      el.textContent = label;
+      el.addEventListener('click', () => {
+        this.hideSpeech();
+        fn();
+      });
+      btns.append(el);
+    };
+    mk(a, '', onA);
+    mk(b, 'ghost', onB);
+    this.$('pip').classList.remove('hidden');
+    this.speaking = true;
+  }
+
+
+  showBasket(items: { emoji: string; name: string; desc: string; id: string }[], note: string, skipLabel: string, onPick: (id: string | null) => void) {
+    this.$('basketNote').textContent = note;
+    const box = this.$('basketItems');
+    box.innerHTML = '';
+    for (const it of items) {
+      const b = document.createElement('button');
+      b.className = 'basketItem';
+      b.innerHTML = `<span class="be"></span><b></b><small></small>`;
+      b.querySelector('.be')!.textContent = it.emoji;
+      b.querySelector('b')!.textContent = it.name;
+      b.querySelector('small')!.textContent = it.desc;
+      b.addEventListener('click', () => onPick(it.id));
+      box.append(b);
+    }
+    const skip = this.$('basketSkip');
+    skip.textContent = skipLabel;
+    skip.onclick = () => onPick(null);
+    this.show('scrBasket');
+  }
+
+  showClub(d: {
+    stars: number;
+    maxStars: number;
+    errands: number;
+    projects: { name: string; effect: string; hint: string; done: boolean }[];
+    caps: { id: string; name: string; color: number; need: number }[];
+    scarves: { id: string; name: string; color: number; need: number }[];
+    cap: string;
+    scarf: string;
+    onCap: (id: string) => void;
+    onScarf: (id: string) => void;
+  }) {
+    this.$('clubStars').innerHTML = `<b>★ ${d.stars}</b> / ${d.maxStars} stars · ${d.errands}/9 errands`;
+    const pr = this.$('clubProjects');
+    pr.innerHTML = '';
+    for (const p of d.projects) {
+      const row = document.createElement('div');
+      row.className = 'project' + (p.done ? ' done' : '');
+      row.innerHTML = `<span class="pi"></span><div><b></b><small></small></div>`;
+      row.querySelector('.pi')!.textContent = p.done ? '✓' : '🔨';
+      row.querySelector('b')!.textContent = p.name;
+      row.querySelector('small')!.textContent = p.done ? p.effect : `${p.hint} ${p.effect}`;
+      pr.append(row);
+    }
+    const sw = (target: string, list: typeof d.caps, sel: string, on: (id: string) => void) => {
+      const box = this.$(target);
+      box.innerHTML = '';
+      for (const c of list) {
+        const locked = d.stars < c.need;
+        const b = document.createElement('button');
+        b.className = 'swatch' + (c.id === sel ? ' on' : '') + (locked ? ' locked' : '');
+        b.style.setProperty('--sw', `#${c.color.toString(16).padStart(6, '0')}`);
+        b.innerHTML = `<i></i><small></small>`;
+        b.querySelector('small')!.textContent = locked ? `★${c.need}` : c.name;
+        b.setAttribute('aria-label', locked ? `${c.name}, needs ${c.need} stars` : c.name);
+        b.disabled = locked;
+        b.addEventListener('click', () => on(c.id));
+        box.append(b);
+      }
+    };
+    sw('clubCaps', d.caps, d.cap, d.onCap);
+    sw('clubScarves', d.scarves, d.scarf, d.onScarf);
+  }
+
+  setClubInfo(t: string) {
+    this.$('clubInfo').textContent = t;
+  }
+
+  setHoleExtras(stars: number, errandText: string, unlocks: string[]) {
+    const s = (bit: number, label: string) => `<span class="${stars & bit ? 'on' : ''}">★<small>${label}</small></span>`;
+    this.$('holeStars').innerHTML = s(1, 'Par') + s(2, 'Birdie') + s(4, 'Errand');
+    this.$('holeStars').title = errandText;
+    const u = this.$('holeUnlocks');
+    u.innerHTML = '';
+    for (const line of unlocks) {
+      const d = document.createElement('div');
+      d.textContent = line;
+      u.append(d);
+    }
   }
 
   // ---- settings ----

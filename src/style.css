@@ -1281,3 +1281,280 @@ table.sc td.tot {
   align-items: flex-start;
   padding-bottom: 4px;
 }
+
+/* ---------- Errands, items, spin ---------- */
+.chip.errand {
+  pointer-events: auto;
+  font-family: inherit;
+  color: var(--ink);
+  font-size: 12px;
+  min-height: 30px;
+  background: #fff7d6;
+  cursor: pointer;
+}
+.chip.errand.done {
+  background: var(--mint);
+}
+.chip.errand.failed {
+  background: #e4ddcd;
+  color: var(--ink2);
+}
+.shotMods {
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modBtn {
+  width: 60px;
+  min-height: 54px;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  background: var(--cream);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  line-height: 1;
+  box-shadow: 0 3px 0 rgba(59, 47, 42, 0.4);
+}
+.modBtn span {
+  font-size: 22px;
+}
+.modBtn small {
+  font-size: 10px;
+  font-weight: 900;
+  margin-top: 2px;
+}
+.modBtn.armed {
+  background: var(--butter);
+  box-shadow: 0 0 0 3px #fff, 0 3px 0 rgba(59, 47, 42, 0.4);
+  animation: wiggle 1.2s ease-in-out infinite;
+}
+@keyframes wiggle {
+  50% {
+    transform: rotate(-4deg) scale(1.04);
+  }
+}
+.hud.flying .shotMods {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.stamp {
+  position: absolute;
+  left: 50%;
+  top: 30%;
+  transform: translate(-50%, -50%) rotate(-6deg);
+  font-size: 42px;
+  font-weight: 900;
+  color: var(--butter);
+  -webkit-text-stroke: 6px var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 5px 0 rgba(59, 47, 42, 0.45);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: stamp 0.45s cubic-bezier(0.2, 1.6, 0.4, 1);
+  z-index: 4;
+}
+@keyframes stamp {
+  from {
+    transform: translate(-50%, -50%) rotate(-6deg) scale(2.4);
+    opacity: 0;
+  }
+}
+.flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background: #fff;
+  opacity: 0;
+}
+.flash.go {
+  animation: flash 0.35s ease-out;
+}
+@keyframes flash {
+  from {
+    opacity: 0.55;
+  }
+}
+
+/* ---------- Picnic basket ---------- */
+.basketCard {
+  text-align: center;
+}
+.basketCard h2 {
+  justify-content: center;
+}
+.basketItems {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 8px 0 12px;
+}
+.basketItem {
+  min-height: 150px;
+  border: 3px solid var(--ink);
+  border-radius: 18px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 8px;
+  box-shadow: 0 4px 0 rgba(59, 47, 42, 0.4);
+  font-family: inherit;
+}
+.basketItem:active {
+  transform: translateY(3px);
+  box-shadow: 0 1px 0 rgba(59, 47, 42, 0.4);
+}
+.basketItem .be {
+  font-size: 46px;
+  line-height: 1;
+}
+.basketItem b {
+  font-size: 16px;
+  font-weight: 900;
+}
+.basketItem small {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ink2);
+}
+
+/* ---------- Club screen ---------- */
+.card h3 {
+  margin: 14px 0 6px;
+  font-size: 17px;
+  font-weight: 900;
+}
+.clubStars {
+  font-weight: 800;
+  font-size: 15px;
+}
+.clubStars b {
+  font-size: 22px;
+  color: #d99a00;
+}
+.projects {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.project {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  background: #fff;
+  border: 2.5px solid var(--ink);
+  border-radius: 14px;
+  padding: 6px 10px;
+}
+.project.done {
+  background: #e7fbe9;
+}
+.project .pi {
+  font-size: 20px;
+  width: 26px;
+  text-align: center;
+}
+.project b {
+  display: block;
+  font-size: 14px;
+}
+.project small {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink2);
+}
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch {
+  width: 56px;
+  min-height: 60px;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  font-family: inherit;
+}
+.swatch i {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--sw);
+  border: 2.5px solid var(--ink);
+}
+.swatch small {
+  font-size: 10px;
+  font-weight: 900;
+}
+.swatch.on {
+  background: var(--butter);
+  box-shadow: inset 0 0 0 2px #fff;
+}
+.swatch.locked {
+  opacity: 0.55;
+}
+.swatch.locked i {
+  filter: grayscale(1);
+}
+
+/* ---------- Hole stars ---------- */
+.holeStars {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin: 4px 0 6px;
+}
+.holeStars span {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 34px;
+  line-height: 1;
+  color: #ddd3bf;
+  -webkit-text-stroke: 2px var(--ink);
+}
+.holeStars span.on {
+  color: #ffc23a;
+  animation: pop 0.4s ease-out;
+}
+.holeStars small {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--ink2);
+  -webkit-text-stroke: 0;
+}
+.holeUnlocks div {
+  background: var(--mint);
+  border: 2.5px solid var(--ink);
+  border-radius: 12px;
+  padding: 4px 8px;
+  margin: 4px 0;
+  font-weight: 900;
+  font-size: 14px;
+}
+.basketNote {
+  font-weight: 900;
+  font-size: 14px;
+  margin: 0 0 4px;
+  color: var(--coral);
+}
+.basketNote:empty {
+  display: none;
+}

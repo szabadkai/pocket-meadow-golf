@@ -30,6 +30,11 @@ export class Golfer {
   readonly root = new THREE.Group();
   readonly swing = new THREE.Group();
   private bodyGroup: THREE.Group;
+  private capMat: THREE.MeshToonMaterial;
+
+  setCap(color: number) {
+    this.capMat.color.setHex(color);
+  }
 
   constructor() {
     const body: Part[] = [
@@ -45,13 +50,17 @@ export class Golfer {
       { g: GEO.sphereLo, c: INK, p: [-0.14, 2.02, 0.36], s: [0.05, 0.07, 0.04] },
       { g: GEO.sphereLo, c: 0xff9e9e, p: [0.24, 1.9, 0.32], s: [0.07, 0.05, 0.03] },
       { g: GEO.sphereLo, c: 0xff9e9e, p: [-0.24, 1.9, 0.32], s: [0.07, 0.05, 0.03] },
-      // The oversized cap.
-      { g: GEO.halfSphere, c: PALETTE.butter, p: [0, 2.08, -0.02], s: [0.5, 0.42, 0.5] },
-      { g: GEO.cyl, c: PALETTE.butter, p: [0, 2.1, 0.45], s: [0.42, 0.05, 0.5] },
       { g: GEO.sphereLo, c: PALETTE.coral, p: [0, 2.5, -0.02], s: 0.08 },
       { g: GEO.cyl, c: PALETTE.coral, p: [0, 2.12, -0.02], s: [0.505, 0.06, 0.505] },
     ];
     this.bodyGroup = withOutline(assemble(body));
+    // The oversized cap is its own mesh so the wardrobe can recolour it.
+    const capGeo = assemble([
+      { g: GEO.halfSphere, c: 0xffffff, p: [0, 2.08, -0.02], s: [0.5, 0.42, 0.5] },
+      { g: GEO.cyl, c: 0xffffff, p: [0, 2.1, 0.45], s: [0.42, 0.05, 0.5] },
+    ]);
+    this.capMat = new THREE.MeshToonMaterial({ color: PALETTE.butter, vertexColors: true, gradientMap: toon(0xffffff).gradientMap });
+    this.bodyGroup.add(new THREE.Mesh(capGeo, outlineMaterial()), new THREE.Mesh(capGeo, this.capMat));
     this.root.add(this.bodyGroup);
 
     const rig: Part[] = [
@@ -83,6 +92,11 @@ export class BirdCaddie {
   readonly body: THREE.Group;
   readonly wingL: THREE.Mesh;
   readonly wingR: THREE.Mesh;
+  private scarfMat: THREE.MeshToonMaterial;
+
+  setScarf(color: number) {
+    this.scarfMat.color.setHex(color);
+  }
 
   constructor() {
     const parts: Part[] = [
@@ -96,11 +110,14 @@ export class BirdCaddie {
       { g: GEO.cone, c: 0x5aaedb, p: [0, 1.22, -0.05], r: [-0.4, 0, 0], s: [0.09, 0.26, 0.09] },
       { g: GEO.cyl, c: 0xffa53d, p: [0.15, 0.06, 0.05], s: [0.04, 0.14, 0.04] },
       { g: GEO.cyl, c: 0xffa53d, p: [-0.15, 0.06, 0.05], s: [0.04, 0.14, 0.04] },
-      // Scarf.
-      { g: GEO.cyl, c: PALETTE.coral, p: [0, 0.38, 0], s: [0.46, 0.1, 0.46] },
-      { g: GEO.box, c: PALETTE.coral, p: [0.25, 0.25, -0.3], r: [0.3, 0.4, 0.3], s: [0.14, 0.26, 0.05] },
     ];
     this.body = withOutline(assemble(parts));
+    const scarfGeo = assemble([
+      { g: GEO.cyl, c: 0xffffff, p: [0, 0.38, 0], s: [0.46, 0.1, 0.46] },
+      { g: GEO.box, c: 0xffffff, p: [0.25, 0.25, -0.3], r: [0.3, 0.4, 0.3], s: [0.14, 0.26, 0.05] },
+    ]);
+    this.scarfMat = new THREE.MeshToonMaterial({ color: PALETTE.coral, vertexColors: true, gradientMap: toon(0xffffff).gradientMap });
+    this.body.add(new THREE.Mesh(scarfGeo, this.scarfMat));
     const wingGeo = assemble([{ g: GEO.sphereLo, c: 0x5aaedb, s: [0.08, 0.26, 0.2] }]);
     const wm = toon(0xffffff, { vertexColors: true });
     this.wingL = new THREE.Mesh(wingGeo, wm);

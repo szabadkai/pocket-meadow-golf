@@ -16,9 +16,13 @@ export interface FrameOpts {
   maxScale?: number;
   /** Override the vertical anchor: fraction down the rect where the first point should sit. */
   anchorFirst?: number;
+  /** Camera tilt (radians from horizontal); defaults to the standard elevated view. */
+  pitch?: number;
 }
 
-const PITCH = (54 * Math.PI) / 180;
+export const PITCH = (54 * Math.PI) / 180;
+/** Low, side-on pitch used while the ball flies so its arc reads clearly. */
+export const FLIGHT_PITCH = (30 * Math.PI) / 180;
 const DIST = 1500;
 
 /**
@@ -49,9 +53,19 @@ export class CameraRig {
   private u = new THREE.Vector3();
   private f = new THREE.Vector3();
 
-  private basis(yaw: number) {
-    const cp = Math.cos(PITCH);
-    const sp = Math.sin(PITCH);
+  pitch = PITCH;
+  tpitch = PITCH;
+  private shakeAmp = 0;
+  private shakeT = 0;
+
+  /** Screen shake in CSS px; decays quickly. */
+  shake(px: number) {
+    this.shakeAmp = Math.max(this.shakeAmp, px);
+  }
+
+  private basis(yaw: number, pitch = this.pitch) {
+    const cp = Math.cos(pitch);
+    const sp = Math.sin(pitch);
     const dx = Math.sin(yaw);
     const dz = -Math.cos(yaw);
     this.f.set(dx * cp, -sp, dz * cp);
@@ -61,7 +75,8 @@ export class CameraRig {
 
   /** Fit points (xyz triplets) into the course rect. */
   frame(points: ArrayLike<number>, count: number, yaw: number, opts: FrameOpts = {}) {
-    this.basis(yaw);
+    const pitch = opts.pitch ?? PITCH;
+    this.basis(yaw, pitch);
     const { r, u } = this;
     let amin = Infinity;
     let amax = -Infinity;
@@ -115,6 +130,7 @@ export class CameraRig {
     this.tfz = oz + t * this.f.z;
     this.tyaw = yaw;
     this.tscale = s;
+    this.tpitch = pitch;
   }
 
   snap() {
@@ -123,6 +139,7 @@ export class CameraRig {
     this.fz = this.tfz;
     this.yaw = this.tyaw;
     this.scale = this.tscale;
+    this.pitch = this.tpitch;
   }
 
   /** Returns true while still moving noticeably. */
@@ -135,8 +152,15 @@ export class CameraRig {
       Math.abs(dy) > 1e-4 ||
       Math.abs(this.tfx - this.fx) > 0.02 ||
       Math.abs(this.tfz - this.fz) > 0.02 ||
-      Math.abs(Math.log(this.tscale / this.scale)) > 0.002;
+      Math.abs(Math.log(this.tscale / this.scale)) > 0.002 ||
+      Math.abs(this.tpitch - this.pitch) > 1e-3 ||
+      this.shakeAmp > 0.05;
     this.yaw += dy * k;
+    this.pitch += (this.tpitch - this.pitch) * k;
+    if (this.shakeAmp > 0.05) {
+      this.shakeT += dt;
+      this.shakeAmp *= Math.exp(-dt * 9);
+    } else this.shakeAmp = 0;
     this.fx += (this.tfx - this.fx) * k;
     this.fy += (this.tfy - this.fy) * k;
     this.fz += (this.tfz - this.fz) * k;
@@ -148,9 +172,16 @@ export class CameraRig {
   apply() {
     this.basis(this.yaw);
     const c = this.camera;
-    c.position.set(this.fx - this.f.x * DIST, this.fy - this.f.y * DIST, this.fz - this.f.z * DIST);
+    // Shake: a small screen-space wobble of the focus point.
+    const sa = this.shakeAmp * this.scale;
+    const ox = sa * Math.sin(this.shakeT * 71);
+    const oy = sa * Math.cos(this.shakeT * 53);
+    const fx = this.fx + this.r.x * ox + this.u.x * oy;
+    const fy = this.fy + this.r.y * ox + this.u.y * oy;
+    const fz = this.fz + this.r.z * ox + this.u.z * oy;
+    c.position.set(fx - this.f.x * DIST, fy - this.f.y * DIST, fz - this.f.z * DIST);
     c.up.set(0, 1, 0);
-    c.lookAt(this.fx, this.fy, this.fz);
+    c.lookAt(fx, fy, fz);
     const hw = (this.vw / 2) * this.scale;
     const hh = (this.vh / 2) * this.scale;
     c.left = -hw;
@@ -170,7 +201,7 @@ export class CameraRig {
     const rX = Math.cos(this.yaw);
     const rZ = Math.sin(this.yaw);
     // Screen-vertical motion covers more ground because the view is tilted.
-    const k = s / Math.sin(PITCH);
+    const k = s / Math.sin(this.pitch);
     this.fx += -dx * s * rX + dy * k * fwdX;
     this.fz += -dx * s * rZ + dy * k * fwdZ;
     this.tfx = this.fx;

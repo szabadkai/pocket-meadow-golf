@@ -1,4 +1,4 @@
-import type { HoleDef, TreeKind } from '../course/types';
+import type { HoleDef, ProjectId, TreeKind } from '../course/types';
 import { BALL_RADIUS, Surface, type SurfaceId } from './constants';
 import { Shape, segDist, toWorld, type V2 } from './shapes';
 
@@ -13,6 +13,10 @@ export interface Collider {
   y1: number;
   /** Fraction of speed kept after hitting (leaves soak up energy). */
   damp: number;
+  /** What was hit, for errands and reactions. */
+  tag?: 'tree' | 'apple' | 'windmill' | 'sails' | 'sheep' | 'mole';
+  /** Extra upward kick (woolly sheep, mole hills). */
+  boost?: number;
 }
 
 /** Ground queries used by the ball simulation. */
@@ -111,9 +115,16 @@ export class CourseWorld implements GroundModel {
   gx = 0;
   gz = 0;
 
-  constructor(def: HoleDef) {
+  readonly restored: ReadonlySet<ProjectId>;
+  /** Mole hills for this round (positions vary per round seed). */
+  readonly moles: { x: number; z: number }[] = [];
+
+  constructor(def: HoleDef, opts: { restored?: ReadonlySet<ProjectId>; seed?: number } = {}) {
     this.def = def;
-    this.fairways = def.fairways.map((d) => new Shape(d));
+    this.restored = opts.restored ?? new Set();
+    this.fairways = [...def.fairways, ...(def.bonusFairways ?? []).filter((b) => this.restored.has(b.requires)).map((b) => b.shape)].map(
+      (d) => new Shape(d),
+    );
     this.green = new Shape(def.green);
     this.bunkers = (def.bunkers ?? []).map((d) => new Shape(d));
     this.islands = (def.islands ?? []).map((d) => new Shape(d));
@@ -161,6 +172,32 @@ export class CourseWorld implements GroundModel {
     }
     this.buildTrees();
     this.buildPropColliders();
+    this.buildCritters(opts.seed);
+  }
+
+  /** Woolly sheep bounce balls skyward; mole hills move around between rounds. */
+  private buildCritters(seed: number | undefined) {
+    for (const a of this.def.animals ?? []) {
+      if (a.kind !== 'sheep') continue;
+      const [x, z] = toWorld(a.at);
+      const y = this.heightAt(x, z);
+      this.colliders.push({ kind: 0, x, y: y + 1.45, z, r: 1.35, y0: 0, y1: 0, damp: 0.75, tag: 'sheep', boost: 7 });
+    }
+    if (seed === undefined) return;
+    const rng = mulberry32(seed * 131 + this.def.number * 7);
+    for (let tries = 0; tries < 400 && this.moles.length < 2; tries++) {
+      const x = this.playArea.minX + rng() * (this.playArea.maxX - this.playArea.minX);
+      const z = this.playArea.minZ + rng() * (this.playArea.maxZ - this.playArea.minZ);
+      if (this.surfaceAt(x, z) !== Surface.Rough) continue;
+      // Near enough to the fairway to matter, clear of tee and green.
+      let fd = Infinity;
+      for (const f of this.fairways) fd = Math.min(fd, f.sdf(x, z));
+      if (fd < 2 || fd > 14 || this.green.sdf(x, z) < 8 || this.tee.sdf(x, z) < 20) continue;
+      if (this.colliders.some((c) => Math.hypot(c.x - x, c.z - z) < 6)) continue;
+      const y = this.heightAt(x, z);
+      this.moles.push({ x, z });
+      this.colliders.push({ kind: 0, x, y: y - 0.5, z, r: 1.3, y0: 0, y1: 0, damp: 0.8, tag: 'mole', boost: 6 });
+    }
   }
 
   /** Rolling hills. */
@@ -306,14 +343,14 @@ export class CourseWorld implements GroundModel {
     const cr = dim.canopy * s;
     if (kind === 'tall') {
       // Cone canopy approximated by two spheres.
-      this.colliders.push({ kind: 0, x, y: y + dim.trunk * s + cr * 0.8, z, r: cr * 0.95, y0: 0, y1: 0, damp: 0.45 });
-      this.colliders.push({ kind: 0, x, y: y + dim.trunk * s + cr * 2.1, z, r: cr * 0.6, y0: 0, y1: 0, damp: 0.45 });
+      this.colliders.push({ kind: 0, x, y: y + dim.trunk * s + cr * 0.8, z, r: cr * 0.95, y0: 0, y1: 0, damp: 0.45, tag: 'tree' });
+      this.colliders.push({ kind: 0, x, y: y + dim.trunk * s + cr * 2.1, z, r: cr * 0.6, y0: 0, y1: 0, damp: 0.45, tag: 'tree' });
     } else {
       const cy = y + dim.trunk * s + cr * 0.85;
-      this.colliders.push({ kind: 0, x, y: cy, z, r: cr * 0.92, y0: 0, y1: 0, damp: 0.45 });
+      this.colliders.push({ kind: 0, x, y: cy, z, r: cr * 0.92, y0: 0, y1: 0, damp: 0.45, tag: kind === 'apple' ? 'apple' : 'tree' });
     }
     if (dim.trunk > 0) {
-      this.colliders.push({ kind: 1, x, y: 0, z, r: 0.35 * s + 0.05, y0: y - 1, y1: y + dim.trunk * s + 0.5, damp: 0.6 });
+      this.colliders.push({ kind: 1, x, y: 0, z, r: 0.35 * s + 0.05, y0: y - 1, y1: y + dim.trunk * s + 0.5, damp: 0.6, tag: kind === 'apple' ? 'apple' : 'tree' });
     }
   }
 
@@ -360,7 +397,14 @@ export class CourseWorld implements GroundModel {
       const y = this.heightAt(x, z);
       const s = p.s ?? 1;
       if (p.type === 'windmill') {
-        this.colliders.push({ kind: 1, x, y: 0, z, r: 4.2 * s, y0: y - 1, y1: y + 15 * s, damp: 0.5 });
+        this.colliders.push({ kind: 1, x, y: 0, z, r: 4.2 * s, y0: y - 1, y1: y + 15 * s, damp: 0.5, tag: 'windmill' });
+        if (this.restored.has('windmill')) {
+          // Turning sails sweep a big disc in front of the tower.
+          const rot = ((p.rot ?? 0) * Math.PI) / 180;
+          const ox = Math.sin(rot) * 3.8;
+          const oz = Math.cos(rot) * 3.8;
+          this.colliders.push({ kind: 0, x: x + ox, y: y + 10 * s, z: z + oz, r: 6 * s, y0: 0, y1: 0, damp: 0.7, tag: 'sails', boost: 2 });
+        }
       }
     }
   }

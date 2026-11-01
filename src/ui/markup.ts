@@ -32,7 +32,13 @@ export const HUD_HTML = `
     <div id="chips" class="chips">
       <span id="chipPin" class="chip">To pin 0y</span>
       <span id="chipLie" class="chip lie">Tee</span>
+      <button id="errandChip" class="chip errand" aria-label="This hole's errand"></button>
     </div>
+    <div id="shotMods" class="shotMods">
+      <button id="itemBtn" class="modBtn hidden" aria-label="Basket item"><span id="itemEmoji">🧺</span><small id="itemLabel">Use</small></button>
+      <button id="spinBtn" class="modBtn" aria-label="Spin"><span id="spinIcon">●</span><small id="spinLabel">No spin</small></button>
+    </div>
+    <div id="stamp" class="stamp hidden"></div>
     <button id="overviewBtn" class="bigBtn overviewBtn" aria-label="Look around the hole">${ICONS.map}<span>Look</span></button>
     <div id="lookTools" class="lookTools hidden">
       <button id="zoomIn" class="bigBtn round" aria-label="Zoom in">+</button>
@@ -44,6 +50,7 @@ export const HUD_HTML = `
       <div class="pipFace" aria-hidden="true"></div>
       <div class="pipBody"><span id="pipText"></span>
         <div id="pipBtns" class="pipBtns hidden"><button id="pipNext" class="smallBtn">Got it</button><button id="pipSkip" class="smallBtn ghost">Skip tutorial</button></div>
+        <div id="pipChoice" class="pipBtns hidden"></div>
       </div>
     </div>
     <div id="toast" class="toast hidden"></div>
@@ -91,6 +98,7 @@ export const HUD_HTML = `
     </div>
   </div>
 </div>
+<div id="flash" class="flash"></div>
 <div id="power" class="powerBubble hidden"><b id="powerPct">0%</b><span id="powerCarry">0y</span></div>
 <div id="screens">
   <section id="scrTitle" class="screen title hidden">
@@ -103,6 +111,7 @@ export const HUD_HTML = `
       <button id="btnContinue" class="bigBtn primary hidden">Continue Round<small id="continueInfo"></small></button>
       <button id="btnPlay" class="bigBtn primary">Play 9 Holes</button>
       <button id="btnPractice" class="bigBtn">Practice</button>
+      <button id="btnClub" class="bigBtn">Club &amp; Wardrobe<small id="clubInfo"></small></button>
       <button id="btnSettings" class="bigBtn">Settings</button>
     </div>
     <div id="titleBest" class="titleBest"></div>
@@ -112,6 +121,27 @@ export const HUD_HTML = `
       <h2><button class="iconBtn back" data-back aria-label="Back">${ICONS.back}</button>Practice</h2>
       <p class="muted">Pick any hole. Scores aren't counted.</p>
       <div id="practiceGrid" class="holeGrid"></div>
+    </div>
+  </section>
+  <section id="scrBasket" class="screen panel hidden">
+    <div class="card pop basketCard">
+      <h2>🧺 Picnic basket</h2>
+      <p class="muted">Pip packed snacks! Each one bends the rules for a single shot. Keep it as long as you like.</p>
+      <p id="basketNote" class="basketNote"></p>
+      <div id="basketItems" class="basketItems"></div>
+      <button id="basketSkip" class="smallBtn ghost">No thanks</button>
+    </div>
+  </section>
+  <section id="scrClub" class="screen panel hidden">
+    <div class="card">
+      <h2><button class="iconBtn back" data-back aria-label="Back">${ICONS.back}</button>The Club</h2>
+      <div id="clubStars" class="clubStars"></div>
+      <h3>Club projects</h3>
+      <div id="clubProjects" class="projects"></div>
+      <h3>Golfer’s cap</h3>
+      <div id="clubCaps" class="swatches"></div>
+      <h3>Pip’s scarf</h3>
+      <div id="clubScarves" class="swatches"></div>
     </div>
   </section>
   <section id="scrSettings" class="screen panel hidden">
@@ -149,6 +179,8 @@ export const HUD_HTML = `
     <div class="card pop">
       <div id="holeScoreName" class="scoreName">Par</div>
       <div id="holeScoreSub" class="muted"></div>
+      <div id="holeStars" class="holeStars"></div>
+      <div id="holeUnlocks" class="holeUnlocks"></div>
       <div id="holeCard"></div>
       <button id="btnNext" class="bigBtn primary">Next hole</button>
     </div>

@@ -181,6 +181,11 @@ export class Effects {
     (this.ballShadow.material as THREE.MeshBasicMaterial).opacity = 1;
   }
 
+  /** Gold trail for perfect strikes, white otherwise. */
+  setTrailColor(hex: number) {
+    (this.trail.material as THREE.MeshBasicMaterial).color.setHex(hex);
+  }
+
   pushTrail(x: number, y: number, z: number) {
     this.trailPts[this.trailHead * 3] = x;
     this.trailPts[this.trailHead * 3 + 1] = y;
@@ -332,7 +337,7 @@ export class Effects {
       for (let i = 0; i < this.trailCount; i++) {
         const idx = (this.trailHead - 1 - i + TRAIL) % TRAIL;
         const f = 1 - i / this.trailCount;
-        const s = dotScale * 0.45 * f * this.trailFade;
+        const s = dotScale * 0.8 * (0.35 + 0.65 * f) * this.trailFade;
         tmpM.compose(tmpP.set(this.trailPts[idx * 3], this.trailPts[idx * 3 + 1], this.trailPts[idx * 3 + 2]), tmpQ.identity(), tmpS.set(s, s, s));
         this.trail.setMatrixAt(i, tmpM);
       }

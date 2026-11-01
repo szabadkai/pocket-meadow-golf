@@ -78,6 +78,18 @@ export interface AnimalActor {
   react: number;
   reactKind: 'cheer' | 'gasp';
   baseRot: number;
+  baseX: number;
+  baseZ: number;
+  /** Ducks paddle away from splashes, then drift home. */
+  fleeX: number;
+  fleeZ: number;
+  fleeT: number;
+}
+
+interface Mole {
+  head: THREE.Object3D;
+  pop: number;
+  phase: number;
 }
 
 export class Scenery {
@@ -86,10 +98,14 @@ export class Scenery {
   private blades: THREE.Object3D[] = [];
   private flags: THREE.Object3D[] = [];
   private lily: THREE.Object3D[] = [];
+  private moles: { x: number; z: number; m: Mole }[] = [];
+  private restored: CourseWorld['restored'];
 
   constructor(world: CourseWorld, quality: number) {
+    this.restored = world.restored;
     this.buildTrees(world.trees);
-    this.buildFlowers(world, quality);
+    this.buildFlowers(world, quality * (world.restored.has('flowers') ? 2.6 : 1));
+    this.buildMoles(world);
     this.buildStakes(world);
     for (const p of world.def.props ?? []) this.buildProp(world, p);
     for (const a of world.def.animals ?? []) {
@@ -102,8 +118,80 @@ export class Scenery {
       root.rotation.y = rot;
       root.scale.setScalar(1.6);
       this.group.add(root);
-      this.animals.push({ kind: a.kind, root, body: root.getObjectByName('body')!, baseY: y, phase: Math.random() * 10, react: 0, reactKind: 'cheer', baseRot: rot });
+      this.animals.push({ kind: a.kind, root, body: root.getObjectByName('body')!, baseY: y, phase: Math.random() * 10, react: 0, reactKind: 'cheer', baseRot: rot, baseX: x, baseZ: z, fleeX: 0, fleeZ: 0, fleeT: 0 });
     }
+  }
+
+  private buildMoles(world: CourseWorld) {
+    const vc = toon(0xffffff, { vertexColors: true });
+    const moundGeo = assemble([{ g: GEO.halfSphere, c: 0x8a5d3c, s: [1.3, 0.7, 1.3] }]);
+    const headGeo = assemble([
+      { g: GEO.sphere, c: 0x5b4a44, s: [0.45, 0.5, 0.45] },
+      { g: GEO.sphereLo, c: 0xffa8b8, p: [0, 0.05, 0.42], s: 0.12 },
+      { g: GEO.sphereLo, c: 0x1d1714, p: [0.17, 0.2, 0.34], s: 0.06 },
+      { g: GEO.sphereLo, c: 0x1d1714, p: [-0.17, 0.2, 0.34], s: 0.06 },
+    ]);
+    world.moles.forEach((p, i) => {
+      const g = new THREE.Group();
+      const y = world.heightAt(p.x, p.z);
+      g.position.set(p.x, y - 0.05, p.z);
+      g.scale.setScalar(1.3);
+      g.add(new THREE.Mesh(moundGeo, vc));
+      const head = new THREE.Group();
+      head.add(new THREE.Mesh(headGeo, outlineMaterial()), new THREE.Mesh(headGeo, vc));
+      head.rotation.y = i * 2.1;
+      g.add(head);
+      this.group.add(g);
+      this.moles.push({ x: p.x, z: p.z, m: { head, pop: 0, phase: i * 3.7 } });
+    });
+  }
+
+  /** A mole springs out of the hill the ball just hit. */
+  molePop(x: number, z: number) {
+    let best: Mole | null = null;
+    let bd = 6;
+    for (const m of this.moles) {
+      const d = Math.hypot(m.x - x, m.z - z);
+      if (d < bd) {
+        bd = d;
+        best = m.m;
+      }
+    }
+    if (best) best.pop = 1.2;
+  }
+
+  /** Ducks near a splash paddle away. */
+  scatter(x: number, z: number) {
+    for (const a of this.animals) {
+      if (a.kind !== 'duck') continue;
+      const dx = a.baseX - x;
+      const dz = a.baseZ - z;
+      const d = Math.hypot(dx, dz);
+      if (d > 30) continue;
+      a.fleeX = (dx / (d || 1)) * 7;
+      a.fleeZ = (dz / (d || 1)) * 7;
+      a.fleeT = 3;
+      a.reactKind = 'gasp';
+      a.react = 0.6;
+    }
+  }
+
+  nearestAnimal(x: number, z: number, maxD: number): AnimalActor | null {
+    let best: AnimalActor | null = null;
+    let bd = maxD;
+    for (const a of this.animals) {
+      const d = Math.hypot(a.root.position.x - x, a.root.position.z - z);
+      if (d < bd) {
+        bd = d;
+        best = a;
+      }
+    }
+    return best;
+  }
+
+  reactOne(a: AnimalActor, kind: 'cheer' | 'gasp') {
+    a.reactKind = kind;
+    a.react = kind === 'cheer' ? 1.6 : 1;
   }
 
   private buildTrees(trees: TreeInstance[]) {
@@ -371,7 +459,10 @@ export class Scenery {
         const n = p.n ?? 12;
         const parts: Part[] = [];
         const segs = 9;
+        const broken = !this.restored.has('bridge');
         for (let i = 0; i < segs; i++) {
+          // Until the club mends it, the middle of the arch has tumbled into the water.
+          if (broken && i >= 3 && i <= 5) continue;
           const t = (i + 0.5) / segs;
           const zz = (t - 0.5) * n;
           const yy = Math.sin(t * Math.PI) * 1.6 + 0.3;
@@ -410,12 +501,14 @@ export class Scenery {
           blades.add(b);
         }
         blades.position.set(0, 10, 3.8);
+        // A stuck windmill droops until the sheep get it going again.
+        if (!this.restored.has('windmill')) blades.rotation.z = 0.38;
         g.add(blades);
         const sh = new THREE.Mesh(new THREE.PlaneGeometry(12, 12).rotateX(-Math.PI / 2), shadowMaterial());
         sh.position.y = 0.06;
         g.add(sh);
         place(g);
-        this.blades.push(blades);
+        if (this.restored.has('windmill')) this.blades.push(blades);
         return;
       }
       case 'clubhouse': {
@@ -425,8 +518,8 @@ export class Scenery {
           { g: GEO.box, c: PALETTE.cream, p: [0, 4.5, -2], s: [22, 7, 12] },
           { g: new THREE.CylinderGeometry(0.01, 13.5, 6, 4, 1), c: PALETTE.coral, p: [0, 11, -2], r: [0, Math.PI / 4, 0], s: [1.15, 1, 0.68] },
           { g: GEO.box, c: 0x8a5d3c, p: [0, 2.7, 4.05], s: [2.4, 4.2, 0.3] },
-          { g: GEO.box, c: 0xffe39a, p: [-6.5, 4.8, 4.05], s: [3, 2.4, 0.3] },
-          { g: GEO.box, c: 0xffe39a, p: [6.5, 4.8, 4.05], s: [3, 2.4, 0.3] },
+          { g: GEO.box, c: this.restored.has('lanterns') ? 0xffe39a : 0x7d8796, p: [-6.5, 4.8, 4.05], s: [3, 2.4, 0.3] },
+          { g: GEO.box, c: this.restored.has('lanterns') ? 0xffe39a : 0x7d8796, p: [6.5, 4.8, 4.05], s: [3, 2.4, 0.3] },
           { g: GEO.box, c: 0xffffff, p: [-6.5, 4.8, 4.15], s: [0.2, 2.4, 0.2] },
           { g: GEO.box, c: 0xffffff, p: [6.5, 4.8, 4.15], s: [0.2, 2.4, 0.2] },
           { g: GEO.box, c: PALETTE.wood, p: [0, 1.2, 6.5], s: [24, 0.3, 5] },
@@ -442,6 +535,22 @@ export class Scenery {
         flag.position.set(-9, 18, -2);
         g.add(flag);
         this.flags.push(flag);
+        if (this.restored.has('lanterns')) {
+          // Glowing lantern string along the porch eaves, plus warm window light.
+          const glow = new THREE.MeshBasicMaterial({ color: 0xffd27a });
+          const bulbs = new THREE.InstancedMesh(GEO.sphereLo, glow, 13);
+          for (let i = 0; i < 13; i++) {
+            const lx = -12 + i * 2;
+            tmpM.compose(tmpP.set(lx, 6.4 - Math.sin((i / 12) * Math.PI) * 0.8, 9.2), tmpQ.identity(), tmpS.set(0.45, 0.55, 0.45));
+            bulbs.setMatrixAt(i, tmpM);
+          }
+          g.add(bulbs);
+          for (const wx of [-6.5, 6.5]) {
+            const win = new THREE.Mesh(new THREE.PlaneGeometry(3, 2.4), new THREE.MeshBasicMaterial({ color: 0xffe9a8 }));
+            win.position.set(wx, 4.8, 4.22);
+            g.add(win);
+          }
+        }
         const sh = new THREE.Mesh(new THREE.PlaneGeometry(34, 26).rotateX(-Math.PI / 2), shadowMaterial());
         sh.position.y = 0.06;
         g.add(sh);
@@ -455,7 +564,23 @@ export class Scenery {
     const speed = reducedMotion ? 0.15 : 0.6;
     for (const b of this.blades) b.rotation.z += dt * speed;
     for (const f of this.flags) f.rotation.y = Math.sin(t * 1.7) * 0.25;
+    for (const mo of this.moles) {
+      const m = mo.m;
+      let up = Math.max(0, Math.sin(t * 0.7 + m.phase) - 0.55) * 1.4;
+      if (m.pop > 0) {
+        m.pop = Math.max(0, m.pop - dt);
+        up = Math.max(up, Math.sin((1 - m.pop / 1.2) * Math.PI) * (reducedMotion ? 0.8 : 1.8));
+      }
+      m.head.position.y = -0.3 + up;
+    }
     for (const a of this.animals) {
+      if (a.fleeT > 0) {
+        a.fleeT = Math.max(0, a.fleeT - dt);
+        // Out fast, back slowly.
+        const k = a.fleeT > 2 ? (3 - a.fleeT) : a.fleeT / 2;
+        a.root.position.x = a.baseX + a.fleeX * k;
+        a.root.position.z = a.baseZ + a.fleeZ * k;
+      }
       const ph = t * 1.5 + a.phase;
       let y = a.baseY;
       let sq = 1;

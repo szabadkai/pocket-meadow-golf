@@ -256,6 +256,80 @@ export class AudioEngine {
     this.tone('triangle', f, f, this.ctx!.currentTime, 0.03, 0.08);
   }
 
+  boing() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    this.tone('sine', 180, 520, t, 0.25, 0.4);
+    this.tone('triangle', 260, 700, t + 0.03, 0.2, 0.15);
+  }
+
+  boop() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    this.tone('sine', 700, 420, t, 0.12, 0.3);
+    this.tone('sine', 980, 980, t + 0.1, 0.08, 0.15);
+  }
+
+  quack() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    for (let i = 0; i < 2; i++) {
+      this.tone('sawtooth', 420, 300, t + i * 0.16, 0.1, 0.07);
+      this.noiseBurst('bandpass', 1200, 900, 3, t + i * 0.16, 0.08, 0.08);
+    }
+  }
+
+  molePop() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    this.tone('sine', 300, 900, t, 0.08, 0.35);
+    this.noiseBurst('lowpass', 600, 200, 0.7, t, 0.12, 0.3);
+  }
+
+  skip() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    this.noiseBurst('bandpass', 3500, 1500, 1.2, t, 0.12, 0.35);
+    this.tone('sine', 900, 1500, t, 0.07, 0.2);
+  }
+
+  unlockChime() {
+    if (!this.ok()) return;
+    const t = this.ctx!.currentTime;
+    ['G5', 'C6', 'E6', 'G6', 'C7'].forEach((n, i) => this.tone('triangle', NOTE[n], NOTE[n], t + i * 0.07, 0.3, 0.2));
+  }
+
+  // ---- flight whistle (a soft tone that follows ball speed) ----
+  private whistle: { o: OscillatorNode; g: GainNode } | null = null;
+
+  flightStart() {
+    if (!this.ok() || this.whistle) return;
+    const c = this.ctx!;
+    const o = c.createOscillator();
+    o.type = 'sine';
+    const g = c.createGain();
+    g.gain.value = 0;
+    o.connect(g).connect(this.sfxGain!);
+    o.start();
+    this.whistle = { o, g };
+  }
+
+  flightUpdate(speed: number, height: number) {
+    if (!this.whistle || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.whistle.o.frequency.setTargetAtTime(600 + speed * 9 + height * 25, t, 0.05);
+    this.whistle.g.gain.setTargetAtTime(Math.min(0.05, speed * 0.0006), t, 0.05);
+  }
+
+  flightStop() {
+    if (!this.whistle || !this.ctx) return;
+    const w = this.whistle;
+    this.whistle = null;
+    const t = this.ctx.currentTime;
+    w.g.gain.setTargetAtTime(0, t, 0.04);
+    w.o.stop(t + 0.3);
+  }
+
   // ---- music ----
   startMusic() {
     if (!this.ctx || this.musicOn) return;

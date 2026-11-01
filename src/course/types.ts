@@ -14,6 +14,18 @@ export type PropKind =
   | 'lilypads'
   | 'basket';
 
+export type ProjectId = 'bridge' | 'windmill' | 'flowers' | 'lanterns' | 'nest';
+
+/** An animal's request on a hole; completing it earns the hole's third star. */
+export type ErrandDef = { who: AnimalKind | 'pip'; text: string } & (
+  | { kind: 'restNear'; at: V2; r: number }
+  | { kind: 'greenFromTee' }
+  | { kind: 'hit'; tag: 'apple' | 'windmill' | 'sheep' }
+  | { kind: 'noSand' }
+  | { kind: 'skip' }
+  | { kind: 'onePutt' }
+);
+
 export interface PropDef {
   type: PropKind;
   at: V2;
@@ -67,4 +79,9 @@ export interface HoleDef {
   wind: V2;
   sky?: 'day' | 'sunset';
   biscuits?: boolean;
+  errand: ErrandDef;
+  /** Fairways that only exist once a club project is restored. */
+  bonusFairways?: { shape: ShapeDef; requires: ProjectId }[];
+  /** Basket item always offered on this hole (e.g. the one its errand needs). */
+  basketGuarantee?: 'jam' | 'balloon' | 'acorn' | 'bee' | 'snail';
 }

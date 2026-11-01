@@ -1,5 +1,6 @@
 import { BallSim, BallState } from './ball';
 import { DT, Surface, type SurfaceId } from './constants';
+import { modsFor, type ItemId } from './items';
 import type { Collider, GroundModel } from './world';
 
 export type ClubId = 'driver' | 'iron' | 'wedge' | 'putter';
@@ -94,6 +95,8 @@ export function calibrate() {
 export function speedFor(club: ClubId, power: number): number {
   calibrate();
   const t = tables.get(club)!;
+  // Above 100% (perfect strikes) extrapolate: carry grows roughly with speed squared.
+  if (power > 1) return t[TABLE_STEPS] * Math.sqrt(power);
   const p = Math.max(0, Math.min(1, power)) * TABLE_STEPS;
   const i = Math.min(TABLE_STEPS - 1, Math.floor(p));
   const f = p - i;
@@ -116,21 +119,31 @@ export interface ShotParams {
   lie: SurfaceId;
   windX: number;
   windZ: number;
+  /** -1 backspin, 0 none, 1 topspin. */
+  spin?: -1 | 0 | 1;
+  item?: ItemId | null;
 }
+
+export const SPIN_NAMES = { '-1': 'Backspin', '0': 'No spin', '1': 'Topspin' } as const;
 
 /** Launch a sim from rest. Identical for real shots and predictions. */
 export function launch(sim: BallSim, p: ShotParams) {
   const club = clubById(p.club);
-  const eff = Math.max(0, Math.min(1, p.power)) * lieMultiplier(p.club, p.lie);
+  const eff = Math.max(0, Math.min(1.1, p.power)) * lieMultiplier(p.club, p.lie);
   const speed = speedFor(p.club, eff);
   const [dx, dz] = aimDir(p.yaw);
   sim.windX = p.windX;
   sim.windZ = p.windZ;
+  sim.mods = modsFor(p.item);
+  const spin = p.club === 'putter' ? 0 : p.spin ?? 0;
+  // Topspin keeps more speed on landing (rolls out); backspin bites and checks back.
+  const spinMul = spin > 0 ? 1.9 : spin < 0 ? 0.3 : 1;
+  sim.checkBack = spin < 0 ? 0.12 : 0;
   if (p.club === 'putter') {
     sim.launchRoll(dx * speed, dz * speed);
   } else {
-    const a = (club.launchDeg * Math.PI) / 180;
-    sim.launchAir(dx * Math.cos(a) * speed, Math.sin(a) * speed, dz * Math.cos(a) * speed, club.spin);
+    const a = ((club.launchDeg + (spin < 0 ? 3 : spin > 0 ? -2 : 0)) * Math.PI) / 180;
+    sim.launchAir(dx * Math.cos(a) * speed, Math.sin(a) * speed, dz * Math.cos(a) * speed, club.spin * spinMul);
   }
 }
 

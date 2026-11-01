@@ -1,4 +1,6 @@
+import type { ItemId } from '../sim/items';
 import type { ClubId } from '../sim/shot';
+import type { ErrandState } from './club';
 
 export interface Settings {
   sfxVol: number;
@@ -8,6 +10,8 @@ export interface Settings {
   quality: 'auto' | 'low' | 'medium' | 'high';
   tutorialDone: boolean;
   haptics: boolean;
+  cap: string;
+  scarf: string;
   /** Settings schema version (2 introduced the swing meter as the default). */
   v?: number;
 }
@@ -33,6 +37,16 @@ export interface SavedRound {
   winds: { mph: number; dir: number }[];
   /** True once the current hole is finished but the next hasn't started. */
   holeDone: boolean;
+  /** Per-round randomness (basket offers, mole hills). */
+  seed?: number;
+  /** Snack carried in the basket (kept between holes until used). */
+  item?: ItemId | null;
+  /** The two hole indices where the basket comes out this round, and those already shown. */
+  basketHoles?: number[];
+  basketSeen?: number[];
+  errand?: ErrandState;
+  /** Pip rescues used this round. */
+  rescues?: number;
 }
 
 export interface Bests {
@@ -40,6 +54,8 @@ export interface Bests {
   bestToPar: number | null;
   bestHole: (number | null)[];
   roundsPlayed: number;
+  /** Star bitmask per hole: 1 par, 2 birdie, 4 errand. */
+  stars: number[];
 }
 
 const KEY = 'pocketMeadowGolf.v1';
@@ -58,10 +74,12 @@ export const defaultSettings = (): Settings => ({
   quality: 'auto',
   tutorialDone: false,
   haptics: true,
+  cap: 'butter',
+  scarf: 'coral',
   v: 2,
 });
 
-const defaultBests = (): Bests => ({ bestRound: null, bestToPar: null, bestHole: Array(9).fill(null), roundsPlayed: 0 });
+const defaultBests = (): Bests => ({ bestRound: null, bestToPar: null, bestHole: Array(9).fill(null), roundsPlayed: 0, stars: Array(9).fill(0) });
 
 /** localStorage wrapper that degrades to in-memory storage (private mode, blocked storage). */
 export class SaveStore {

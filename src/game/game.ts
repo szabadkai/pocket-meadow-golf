@@ -10,9 +10,12 @@ import { toWorld } from '../sim/shapes';
 import { clubById, launch, lieMultiplier, makePrediction, predict, yawTo, type ClubId } from '../sim/shot';
 import { CourseWorld } from '../sim/world';
 import { UI } from '../ui/ui';
+import { FLIGHT_PITCH, PITCH } from '../render/cameraRig';
+import { ACORN_HOLE, ITEMS, basketGuaranteeFor, basketHoles, offerItems, type ItemId } from '../sim/items';
+import { CAPS, ErrandTracker, PROJECTS, SCARVES, errandsDone, holeStars, restoredSet, totalStars } from './club';
 import { SaveStore, type SavedRound } from './save';
 
-type Phase = 'title' | 'intro' | 'aim' | 'swing' | 'flight' | 'settle' | 'holed' | 'holeDone' | 'results';
+type Phase = 'title' | 'intro' | 'basket' | 'aim' | 'swing' | 'flight' | 'settle' | 'holed' | 'holeDone' | 'results';
 
 const pick = <T>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
 const LINES = {
@@ -26,6 +29,16 @@ const LINES = {
   tree: ['Bonk! Sorry, tree.', 'The apples felt that one.', 'Leafy!'],
   oob: ['Whoops, out of bounds!', 'Over the stakes!'],
   lip: ['Ooh, lipped out!', 'Rattled the rim!'],
+  thanks: ['Thank you!', 'You’re a star!', 'Hooray, thank you!'],
+};
+
+const WHO: Record<string, [string, string]> = {
+  bunny: ['🐰', 'Bunny'],
+  sheep: ['🐑', 'Sheep'],
+  duck: ['🦆', 'Duck'],
+  frog: ['🐸', 'Frog'],
+  hedgehog: ['🦔', 'Hedgehog'],
+  pip: ['🐦', 'Pip'],
 };
 
 export class Game {
@@ -84,6 +97,18 @@ export class Game {
   private lastSwingTick = 0;
   private aimSinceTutorial = 0;
   private meter = new SwingMeter();
+  // Shot modifiers and the fun layer.
+  private spin: -1 | 0 | 1 = 0;
+  private heldItem: ItemId | null = null;
+  private itemArmed = false;
+  private shotItem: ItemId | null = null;
+  private shotSpin: -1 | 0 | 1 = 0;
+  private shotPerfect = false;
+  private errand!: ErrandTracker;
+  private hitStop = 0;
+  private steerInput = 0;
+  private waitingRescue = false;
+  private hitTag: string | null = null;
 
   constructor(app: HTMLElement) {
     this.ui = new UI(app);
@@ -111,7 +136,7 @@ export class Game {
 
   /** Boot steps are separated so the loader can report real progress. */
   bootWorld(index: number) {
-    this.world = new CourseWorld(HOLES[index]);
+    this.world = new CourseWorld(HOLES[index], { restored: restoredSet(this.store.bests.stars), seed: this.round?.seed });
     this.sim = new BallSim(this.world);
     this.scratch = new BallSim(this.world);
     this.sim.listener = (e, s, surf, speed) => this.onSimEvent(e, s, surf, speed);
@@ -165,6 +190,8 @@ export class Game {
     if (q !== this.r.quality) this.r.setQuality(q);
     this.r.rig.rate = s.reducedMotion ? 9 : 4;
     this.ui.syncSettings(s, this.store.available);
+    this.r.golfer.setCap((CAPS.find((c) => c.id === s.cap) ?? CAPS[0]).color);
+    this.r.bird.setScarf((SCARVES.find((c) => c.id === s.scarf) ?? SCARVES[0]).color);
   }
 
   private autoQualityStart(): QualityLevel {
@@ -198,6 +225,9 @@ export class Game {
       this.showTitle();
     });
     ui.onClick('overviewBtn', () => this.toggleOverview());
+    ui.onClick('btnClub', () => this.openClub());
+    ui.onClick('itemBtn', () => this.toggleItem());
+    ui.onClick('spinBtn', () => this.cycleSpin());
     ui.onClick('zoomIn', () => this.lookZoom(0.75));
     ui.onClick('zoomOut', () => this.lookZoom(1.33));
     ui.onClick('btnNext', () => this.nextHole());
@@ -310,6 +340,10 @@ export class Game {
         this.wake();
       },
       tapSwing: (p: number) => this.beginSwing(p),
+      steerActive: () => this.phase === 'flight' && this.shotItem === 'bee' && this.sim.state === BallState.Air,
+      steer: (v: number) => {
+        this.steerInput = v;
+      },
       courseTap: () => {
         if (this.phase === 'flight') this.fastForward = true;
         else if (this.phase === 'holed') this.phaseT = 99;
@@ -371,8 +405,14 @@ export class Game {
             ? `Mishit! ${Math.round(deg)}° ${side}`
             : `${r.grade === 'early' ? 'Early' : 'Late'}: ${Math.round(deg)}° ${side}`;
     this.ui.setMeter('done', r.offset, this.meter.power, msg, '');
-    this.beginSwing(r.power);
-    this.ui.say(msg, 1300);
+    const perfect = r.grade === 'perfect';
+    // A perfect strike flies a little further: a visible reward, not a hidden roll.
+    this.beginSwing(perfect ? r.power * 1.06 : r.power, perfect);
+    if (perfect) {
+      this.ui.stamp('PERFECT!');
+      if (!this.store.settings.reducedMotion) this.ui.flash();
+      this.audio.chirp();
+    } else this.ui.say(msg, 1300);
   }
 
 
@@ -401,6 +441,7 @@ export class Game {
     this.ui.setContinue(info);
     const b = this.store.bests;
     this.ui.setTitleBest(b.bestRound != null ? `Best round: ${b.bestRound} (${formatToPar(b.bestToPar ?? 0)})` : '');
+    this.ui.setClubInfo(`★ ${totalStars(b.stars)} · ${errandsDone(b.stars)}/9 errands`);
     this.titleYaw = 0;
     this.layout();
     this.frameTitle(true);
@@ -431,6 +472,8 @@ export class Game {
       yaw: null,
       winds: this.makeWinds(),
       holeDone: false,
+      seed: Math.floor(Math.random() * 1e9),
+      rescues: 0,
     };
     this.store.setRound(this.round);
     this.startHole(0, false);
@@ -440,7 +483,9 @@ export class Game {
     const r = this.store.round;
     if (!r) return this.newRound();
     this.round = JSON.parse(JSON.stringify(r)) as SavedRound;
+    this.round.seed ??= Math.floor(Math.random() * 1e9);
     if (this.round.holeDone) {
+      this.round.errand = undefined;
       if (this.round.holeIndex >= 8) return this.showResults();
       this.round.holeIndex++;
       this.round.holeDone = false;
@@ -463,6 +508,8 @@ export class Game {
       yaw: null,
       winds: this.makeWinds(),
       holeDone: false,
+      seed: Math.floor(Math.random() * 1e9),
+      rescues: 0,
     };
     this.startHole(i, false);
   }
@@ -480,6 +527,7 @@ export class Game {
     this.round.ball = null;
     this.round.strokes = 0;
     this.round.yaw = null;
+    this.round.errand = undefined;
     this.startHole(this.round.holeIndex, false);
   }
 
@@ -487,12 +535,20 @@ export class Game {
     const round = this.round!;
     round.holeIndex = i;
     this.ui.hideScreens();
-    if (this.world.def.number !== i + 1) {
-      this.bootWorld(i);
-      this.r.loadHole(this.world);
-    } else {
-      this.r.effects.setHole(this.world);
-    }
+    // Rebuilt every hole: restoration progress and this round's mole hills change the course.
+    this.bootWorld(i);
+    this.r.loadHole(this.world);
+    this.errand = new ErrandTracker(this.world.def.errand);
+    if (restore) this.errand.restore(round.errand);
+    else round.errand = undefined;
+    round.basketHoles ??= basketHoles(round.seed ?? 1);
+    round.basketSeen ??= [];
+    this.heldItem = round.item ?? null;
+    this.itemArmed = false;
+    this.spin = 0;
+    this.waitingRescue = false;
+    this.refreshErrandChip();
+    this.refreshMods();
     const w = round.winds[i];
     this.windMph = w.mph;
     this.windDir = w.dir;
@@ -578,6 +634,7 @@ export class Game {
     this.predDirty = true;
     this.refreshTapLabel();
     this.r.effects.slopeVisible = this.lie === Surface.Green || c === 'putter';
+    this.ui.setSpin(this.spin, c !== 'putter');
     if (user) this.frameAim(false);
     this.updateHud();
   }
@@ -601,8 +658,11 @@ export class Game {
     return `${Math.round(eff * clubById(this.club).maxCarry)}y carry`;
   }
 
-  private beginSwing(power: number) {
+  private beginSwing(power: number, perfect = false) {
     if (this.phase !== 'aim') return;
+    this.shotPerfect = perfect;
+    this.shotSpin = this.club === 'putter' ? 0 : this.spin;
+    this.shotItem = this.itemArmed ? this.heldItem : null;
     this.shotPower = power;
     this.shotYaw = this.yaw;
     this.shotClub = this.club;
@@ -630,7 +690,35 @@ export class Game {
     this.flightSteps = 0;
     this.fastForward = false;
     this.sim.place(this.ballX, this.ballZ);
-    launch(this.sim, { club: this.shotClub, power: this.shotPower, yaw: this.shotYaw, lie: this.lie, windX: this.windX, windZ: this.windZ });
+    launch(this.sim, {
+      club: this.shotClub,
+      power: this.shotPower,
+      yaw: this.shotYaw,
+      lie: this.lie,
+      windX: this.windX,
+      windZ: this.windZ,
+      spin: this.shotSpin,
+      item: this.shotItem,
+    });
+    this.errand.shotStart(this.shotClub, this.lie);
+    this.hitTag = null;
+    this.steerInput = 0;
+    if (this.shotItem) {
+      // Basket items are single-use.
+      this.heldItem = null;
+      this.itemArmed = false;
+      if (this.round) this.round.item = null;
+      this.ui.say(`${ITEMS[this.shotItem].emoji} ${ITEMS[this.shotItem].name}!${this.shotItem === 'bee' ? ' Drag to steer!' : ''}`, 1600);
+    }
+    this.spin = 0;
+    this.refreshMods();
+    const reduced = this.store.settings.reducedMotion;
+    const big = this.shotPerfect || (this.shotClub === 'driver' && this.shotPower > 0.85);
+    // A beat of hit-stop and a little shake sell the impact.
+    this.hitStop = reduced || this.shotClub === 'putter' ? 0 : big ? 0.09 : 0.05;
+    if (!reduced && big) this.r.rig.shake(this.shotPerfect ? 7 : 4);
+    this.r.effects.setTrailColor(this.shotPerfect ? 0xffd23a : 0xffffff);
+    if (this.shotClub !== 'putter') this.audio.flightStart();
     this.audio.hit(this.shotClub, this.shotPower);
     if (this.store.settings.haptics) navigator.vibrate?.(14);
     const color = this.lie === Surface.Sand ? 0xf7e0a3 : 0xa6e386;
@@ -648,6 +736,8 @@ export class Game {
   private onSimEvent(e: SimEventId, s: BallSim, surf: SurfaceId, speed: number) {
     const fx = this.r.effects;
     const ff = this.fastForward;
+    if (this.errand.event(e, surf, s.lastHit)) this.errandComplete();
+    if (e === SimEvent.Land || e === SimEvent.Water || e === SimEvent.OOB) this.audio.flightStop();
     switch (e) {
       case SimEvent.Land:
       case SimEvent.Bounce: {
@@ -659,12 +749,35 @@ export class Game {
         }
         break;
       }
-      case SimEvent.Collide:
-        this.hitTree = true;
-        this.audio.tree();
-        fx.puff(s.x, s.y, s.z, 0x5fbf6a, 8, 3);
+      case SimEvent.Collide: {
+        const tag = s.lastHit?.tag ?? 'tree';
+        this.hitTag = tag;
+        const scen = this.r.scenery;
+        if (tag === 'sheep') {
+          this.audio.boing();
+          fx.puff(s.x, s.y, s.z, 0xfff4dc, 10, 3);
+          const a = scen?.nearestAnimal(s.x, s.z, 6);
+          if (a) scen?.reactOne(a, 'cheer');
+        } else if (tag === 'mole') {
+          this.audio.molePop();
+          scen?.molePop(s.x, s.z);
+          fx.puff(s.x, s.y, s.z, 0x8a5d3c, 8, 3);
+        } else {
+          this.hitTree = true;
+          this.audio.tree();
+          fx.puff(s.x, s.y, s.z, tag === 'apple' ? 0xff5a4e : tag === 'windmill' || tag === 'sails' ? 0xfff4dc : 0x5fbf6a, 8, 3);
+          if (!this.store.settings.reducedMotion) this.r.rig.shake(3);
+        }
+        break;
+      }
+      case SimEvent.Skip:
+        this.audio.skip();
+        fx.puff(s.x, s.y, s.z, 0xe9fbff, 8, 3);
+        this.r.scenery?.scatter(s.x, s.z);
         break;
       case SimEvent.Water:
+        this.r.scenery?.scatter(s.x, s.z);
+        this.audio.quack();
         this.audio.splash();
         fx.puff(s.x, s.y, s.z, 0xe9fbff, 16, 6);
         fx.puff(s.x, s.y, s.z, 0x63c3e6, 10, 4);
@@ -692,7 +805,19 @@ export class Game {
       fx.celebrate(w.cupX, w.heightAt(w.cupX, w.cupZ), w.cupZ, scale, this.store.settings.reducedMotion);
       scen?.react('cheer');
       this.audio.cheer();
+      if (this.errand.holed()) this.errandComplete();
       const name = scoreName(this.strokes, w.def.par);
+      if (this.strokes === 1) {
+        // Hole in one: the whole meadow goes wild.
+        this.ui.stamp('HOLE IN ONE!', 2600);
+        if (!this.store.settings.reducedMotion) {
+          this.ui.flash();
+          this.r.rig.shake(8);
+          for (const d of [500, 1000]) window.setTimeout(() => fx.celebrate(w.cupX, w.heightAt(w.cupX, w.cupZ), w.cupZ, scale * 1.4, false), d);
+        }
+        this.audio.fanfare(true);
+        this.phaseT = -1.2;
+      } else if (this.strokes < w.def.par) this.ui.stamp(name);
       this.ui.say(name, 2400);
       this.ui.setSkipHint(true);
       this.r.effects.flag.visible = false;
@@ -702,6 +827,22 @@ export class Game {
     if (s.state === BallState.Water || s.state === BallState.OOB) {
       scen?.react('gasp', { x: s.x, z: s.z });
       this.audio.aww();
+      const left = this.rescuesLeft();
+      if (s.state === BallState.Water && left > 0) {
+        // Pip offers to fly in and fetch it: a free retake, limited per round.
+        this.waitingRescue = true;
+        this.ui.choice(
+          `Splash! I can fly in and fetch it: no penalty, replay from your last spot. (${left} left this round)`,
+          'Fetch it, Pip!',
+          'Take the drop',
+          () => this.pipRescue(),
+          () => {
+            this.waitingRescue = false;
+            this.phaseT = 99;
+          },
+        );
+        return;
+      }
       this.ui.say(pick(s.state === BallState.Water ? LINES.water : LINES.oob), 2200);
       return;
     }
@@ -709,7 +850,20 @@ export class Game {
     const d = Math.hypot(w.cupX - s.x, w.cupZ - s.z);
     const surf = w.surfaceAt(s.x, s.z);
     const travelled = Math.hypot(s.x - this.shotStartX, s.z - this.shotStartZ);
-    if (this.hitTree) {
+    if (this.errand.rest(s.x, s.z, surf)) this.errandComplete();
+    const near = scen?.nearestAnimal(s.x, s.z, 4.5);
+    if (near && near.kind !== 'duck') {
+      // Boop!
+      scen?.reactOne(near, 'cheer');
+      this.audio.boop();
+      this.ui.say(`Boop! The ${near.kind} says hi.`, 1600);
+    } else if (this.hitTag === 'sheep') {
+      this.ui.say('Boing! Woolly trampoline!', 1600);
+    } else if (this.hitTag === 'mole') {
+      this.ui.say('A mole popped it up!', 1600);
+    } else if (this.hitTag === 'sails') {
+      this.ui.say('Swatted by the windmill!', 1600);
+    } else if (this.hitTree) {
       this.ui.say(pick(LINES.tree), 1800);
       scen?.react('gasp', { x: s.x, z: s.z });
     } else if (surf === Surface.Green && d < 2.5 && this.shotClub !== 'putter') {
@@ -731,6 +885,168 @@ export class Game {
     } else if (surf === Surface.Rough && this.shotClub !== 'putter') {
       this.ui.say(pick(LINES.rough), 1300);
     }
+  }
+
+  // ------------------------------------------------------------------ the fun layer
+  private enterAim() {
+    this.phase = 'aim';
+    this.ui.hideScreens();
+    this.frameAim(false);
+    this.updateHud();
+    this.maybeStartTutorial();
+    this.pipRead();
+    this.wake(3);
+  }
+
+  /** Twice a round (practice: only where the hole's errand needs a snack). */
+  private basketDue(): boolean {
+    const r = this.round;
+    if (!r) return false;
+    const i = r.holeIndex;
+    if (r.basketSeen?.includes(i)) return false;
+    if (r.mode === 'practice') return !!this.world.def.basketGuarantee && r.item !== this.world.def.basketGuarantee;
+    return !!r.basketHoles?.includes(i);
+  }
+
+  private openBasket() {
+    const round = this.round!;
+    const i = round.holeIndex;
+    this.phase = 'basket';
+    round.basketSeen = [...(round.basketSeen ?? []), i];
+    const guarantee = round.mode === 'practice' ? this.world.def.basketGuarantee : basketGuaranteeFor(round.basketHoles ?? [], i);
+    const offer = offerItems(round.seed ?? 1, i, guarantee, this.heldItem);
+    const held = this.heldItem ? ITEMS[this.heldItem] : null;
+    const nth = round.mode === 'practice' ? '' : (round.basketHoles ?? []).indexOf(i) === 0 ? 'Basket 1 of 2 this round.' : 'Last basket this round!';
+    this.ui.showBasket(
+      offer.map((id) => ITEMS[id]),
+      held ? `${nth} You’re still carrying ${held.emoji} ${held.name}: picking swaps it.` : nth,
+      held ? `Keep ${held.emoji} ${held.name.split(' ')[0]}` : 'No thanks',
+      (id) => {
+        this.audio.tap();
+        // "No thanks" keeps whatever you were carrying.
+        if (id) round.item = id as ItemId;
+        this.heldItem = round.item ?? null;
+        this.itemArmed = false;
+        this.refreshMods();
+        this.saveNow();
+        this.enterAim();
+        if (id === 'acorn' && i < ACORN_HOLE) this.ui.say('🌰 Psst: the ducks on hole 7 love a skipping acorn. Maybe save it?', 3200);
+        else if (id) this.ui.say(`${ITEMS[id as ItemId].emoji} Tap the basket button to use it on a shot. It keeps until you do.`, 2800);
+      },
+    );
+  }
+
+  private toggleItem() {
+    if (!this.canAim() || !this.heldItem) return;
+    this.itemArmed = !this.itemArmed;
+    this.predDirty = true;
+    this.audio.tap();
+    this.refreshMods();
+    if (this.itemArmed) this.ui.say(`${ITEMS[this.heldItem].emoji} ${ITEMS[this.heldItem].desc}`, 2200);
+  }
+
+  private cycleSpin() {
+    if (!this.canAim() || this.club === 'putter') return;
+    this.spin = this.spin === 0 ? 1 : this.spin === 1 ? -1 : 0;
+    this.predDirty = true;
+    this.audio.tap();
+    this.refreshMods();
+    this.ui.say(this.spin > 0 ? 'Topspin: it’ll run out after landing.' : this.spin < 0 ? 'Backspin: it’ll bite and check up.' : 'No spin.', 1500);
+  }
+
+  private refreshMods() {
+    const it = this.heldItem ? ITEMS[this.heldItem] : null;
+    this.ui.setItem(it ? it.emoji : null, it ? it.name.split(' ')[0] : '', this.itemArmed);
+    this.ui.setSpin(this.spin, this.club !== 'putter');
+  }
+
+  private refreshErrandChip() {
+    const e = this.world.def.errand;
+    this.ui.setErrand(WHO[e.who][0], `${WHO[e.who][1]}: “${e.text}”`, this.errand.s.done, this.errand.s.failed);
+  }
+
+  private errandComplete() {
+    const e = this.world.def.errand;
+    this.ui.stamp('Errand done! ★', 1600);
+    window.setTimeout(() => this.audio.unlockChime(), 250);
+    const scen = this.r.scenery;
+    const who = scen?.animals.find((a) => a.kind === e.who);
+    if (who) scen?.reactOne(who, 'cheer');
+    this.ui.say(`${WHO[e.who][0]} ${pick(LINES.thanks)}`, 1800);
+    this.refreshErrandChip();
+    if (this.round) this.round.errand = { ...this.errand.s };
+  }
+
+  private rescuesLeft(): number {
+    const max = restoredSet(this.store.bests.stars).has('nest') ? 2 : 1;
+    return Math.max(0, max - (this.round?.rescues ?? 0));
+  }
+
+  private pipRescue() {
+    const round = this.round!;
+    round.rescues = (round.rescues ?? 0) + 1;
+    this.waitingRescue = false;
+    // The splashed stroke doesn't count.
+    this.strokes = Math.max(0, this.strokes - 1);
+    this.ballX = this.shotStartX;
+    this.ballZ = this.shotStartZ;
+    this.sim.place(this.ballX, this.ballZ);
+    this.audio.chirp();
+    this.ui.toastMsg('Pip fetched it!', 'Free retake from your last spot.', 2200);
+    this.phase = 'aim';
+    this.ui.setFlying(false);
+    this.prepareAim(this.shotYaw, this.shotClub);
+    this.frameAim(false);
+    this.saveNow();
+    this.wake(3);
+  }
+
+  /** Pip reads the shot: wind and trouble on the calm-air line. */
+  private pipRead() {
+    if (this.tutorialStep >= 0 || this.club === 'putter' || this.phase !== 'aim') return;
+    const cy = Math.cos(this.yaw);
+    const sy = Math.sin(this.yaw);
+    const cross = this.windX * cy + this.windZ * sy;
+    const along = this.windX * sy - this.windZ * cy;
+    predict(this.scratch, this.ballX, this.ballZ, { club: this.club, power: 1, yaw: this.yaw, lie: this.lie, windX: 0, windZ: 0 }, this.pred);
+    this.predDirty = true;
+    let msg = '';
+    if (this.pred.valid && this.pred.surface === Surface.Water) msg = 'Careful: full power on this line finds the pond!';
+    else if (this.pred.valid && this.pred.surface === Surface.OOB) msg = 'Full power on this line goes out of bounds!';
+    else if (Math.abs(cross) >= 3) msg = `Wind’s pushing ${cross > 0 ? 'right' : 'left'}. Aim a touch ${cross > 0 ? 'left' : 'right'}.`;
+    else if (along <= -3) msg = 'Into the wind: it’ll come up short. Club up!';
+    else if (along >= 3) msg = 'Wind at your back: it’ll fly!';
+    if (msg) this.ui.say(`🐦 ${msg}`, 2800);
+  }
+
+  private openClub() {
+    const b = this.store.bests;
+    const stars = totalStars(b.stars);
+    const render = () =>
+      this.ui.showClub({
+        stars,
+        maxStars: 27,
+        errands: errandsDone(b.stars),
+        projects: PROJECTS.map((p) => ({ name: p.name, effect: p.effect, hint: p.hint, done: p.unlocked(b.stars) })),
+        caps: CAPS,
+        scarves: SCARVES,
+        cap: this.store.settings.cap,
+        scarf: this.store.settings.scarf,
+        onCap: (id) => {
+          this.store.updateSettings({ cap: id });
+          this.applySettings();
+          this.audio.tap();
+          render();
+        },
+        onScarf: (id) => {
+          this.store.updateSettings({ scarf: id });
+          this.applySettings();
+          this.audio.tap();
+          render();
+        },
+      });
+    render();
+    this.ui.show('scrClub', 'scrTitle');
   }
 
   /** Called after the settle pause: apply penalties, place the ball, save, next aim. */
@@ -771,8 +1087,10 @@ export class Game {
     this.ui.setFlying(false);
     this.prepareAim(null, null);
     this.frameAim(false);
+    this.refreshErrandChip();
     this.saveNow();
     if (this.tutorialStep === 3 || (this.tutorialStep === 4 && this.lie === Surface.Green)) this.showTutorial();
+    else if (!msg) window.setTimeout(() => this.pipRead(), 900);
   }
 
   private finishHole() {
@@ -790,6 +1108,20 @@ export class Game {
       });
       this.store.setRound(round);
     }
+    // Stars (practice counts too) and anything they unlock.
+    const mask = holeStars(this.strokes, par, this.errand.s.done);
+    const before = totalStars(this.store.bests.stars);
+    const beforeProjects = restoredSet(this.store.bests.stars);
+    this.store.updateBests((b) => {
+      b.stars[i] = (b.stars[i] ?? 0) | mask;
+    });
+    const after = totalStars(this.store.bests.stars);
+    const unlocks: string[] = [];
+    for (const p of PROJECTS) if (p.unlocked(this.store.bests.stars) && !beforeProjects.has(p.id)) unlocks.push(`🔨 Club project done: ${p.name}! ${p.effect}`);
+    for (const c of CAPS) if (c.need > before && c.need <= after) unlocks.push(`🧢 New cap: ${c.name}`);
+    for (const c of SCARVES) if (c.need > before && c.need <= after) unlocks.push(`🧣 New scarf for Pip: ${c.name}`);
+    this.ui.setHoleExtras(mask, this.world.def.errand.text, unlocks);
+    if (unlocks.length) window.setTimeout(() => this.audio.unlockChime(), 600);
     const name = scoreName(this.strokes, par);
     const t = roundTotals(round.scores, HOLES.map((h) => h.par));
     this.ui.showHoleDone(
@@ -811,6 +1143,7 @@ export class Game {
       this.round.scores = Array(9).fill(null);
       this.round.holeDone = false;
       this.round.ball = null;
+      this.round.basketSeen = [];
       this.startHole(this.practiceHole, false);
       return;
     }
@@ -820,6 +1153,7 @@ export class Game {
     round.ball = null;
     round.strokes = 0;
     round.yaw = null;
+    round.errand = undefined;
     this.startHole(round.holeIndex, false);
   }
 
@@ -858,6 +1192,7 @@ export class Game {
       round.yaw = this.yaw;
     }
     // Mid-shot, the last resolved state (already in round) is what persists.
+    if (this.errand) round.errand = { ...this.errand.s };
     this.store.setRound(round);
   }
 
@@ -1031,7 +1366,11 @@ export class Game {
     const dc = Math.hypot(w.cupX - s.x, w.cupZ - s.z);
     if (dc < 30) put(w.cupX, w.heightAt(w.cupX, w.cupZ), w.cupZ);
     const putt = this.shotClub === 'putter';
-    this.r.rig.frame(pts, n, this.shotYaw, { padTop: 70, padBottom: 60, padSide: 40, minExtent: putt ? 18 : 70, maxScale: 0.5 });
+    // Swing round to a low side-on view so the arc reads; putts stay behind the ball.
+    const side = !putt && !this.store.settings.reducedMotion;
+    const yaw = side ? this.shotYaw + 0.55 : this.shotYaw;
+    const pitch = side ? (s.state === BallState.Air ? FLIGHT_PITCH : FLIGHT_PITCH + 0.15) : PITCH;
+    this.r.rig.frame(pts, n, yaw, { padTop: 70, padBottom: 60, padSide: 40, minExtent: putt ? 18 : 70, maxScale: 0.5, pitch });
   }
 
   private lookZoom(f: number) {
@@ -1066,7 +1405,14 @@ export class Game {
   // ------------------------------------------------------------------ prediction
   private computePrediction(ghost: boolean) {
     const power = ghost ? 1 : this.store.settings.swingMode === 'tap' && !this.pulling && this.phase === 'aim' ? this.controls.tapPower : this.pullPower;
-    predict(this.scratch, this.ballX, this.ballZ, { club: this.club, power, yaw: this.yaw, lie: this.lie, windX: this.windX, windZ: this.windZ }, this.pred);
+    // The preview shows a calm-air landing: reading the wind is the player's job.
+    predict(
+      this.scratch,
+      this.ballX,
+      this.ballZ,
+      { club: this.club, power, yaw: this.yaw, lie: this.lie, windX: 0, windZ: 0, spin: this.spin, item: this.itemArmed ? this.heldItem : null },
+      this.pred,
+    );
   }
 
   private refreshAimVisuals() {
@@ -1133,7 +1479,7 @@ export class Game {
   private showTutorial() {
     const steps = [
       { t: 'Hi, I’m Pip, your caddie! Drag along the aim bar — or anywhere on the course — to point your shot.', btn: false },
-      { t: 'The yellow dots show where the ball first lands. Pick clubs down below: Driver hits farthest.', btn: true },
+      { t: 'The yellow dots show where the ball lands in calm air. The wind (top right) will push it, so allow for it! Clubs live down below.', btn: true },
       {
         t:
           this.store.settings.swingMode === 'meter'
@@ -1225,11 +1571,11 @@ export class Game {
         break;
       case 'intro':
         if (this.phaseT > (reduced ? 1.0 : 2.2)) {
-          this.phase = 'aim';
-          this.frameAim(false);
-          this.updateHud();
-          this.maybeStartTutorial();
-          this.wake(3);
+          if (this.basketDue()) {
+            this.openBasket();
+            break;
+          }
+          this.enterAim();
         }
         break;
       case 'aim':
@@ -1266,7 +1612,23 @@ export class Game {
       }
       case 'flight': {
         this.r.golfer.setSwing(Math.min(1, 0.2 + (this.phaseT / 0.35) * 0.8));
-        const speedMul = this.fastForward ? 4 : 1;
+        if (this.hitStop > 0) {
+          this.hitStop -= dt;
+          this.frameFlight();
+          break;
+        }
+        const sm = this.sim;
+        let speedMul = this.fastForward ? 4 : 1;
+        // Slow-motion as a rolling ball reaches the cup.
+        if (!this.fastForward && !reduced && sm.state === BallState.Roll) {
+          const dc = Math.hypot(this.world.cupX - sm.x, this.world.cupZ - sm.z);
+          if (dc < 2.4 && Math.hypot(sm.vx, sm.vz) > 0.3) speedMul = 0.4;
+        }
+        if (this.shotItem === 'bee' && sm.state === BallState.Air) {
+          sm.steerX = Math.cos(this.shotYaw) * this.steerInput * 9;
+          sm.steerZ = Math.sin(this.shotYaw) * this.steerInput * 9;
+        } else sm.steerX = sm.steerZ = 0;
+        if (sm.state === BallState.Air) this.audio.flightUpdate(Math.hypot(sm.vx, sm.vy, sm.vz), sm.y - this.world.heightAt(sm.x, sm.z));
         this.acc += dt * speedMul;
         while (this.acc >= DT && this.sim.moving) {
           this.acc -= DT;
@@ -1282,6 +1644,7 @@ export class Game {
         break;
       }
       case 'settle': {
+        if (this.waitingRescue) break;
         const wait = this.sim.state === BallState.Water || this.sim.state === BallState.OOB ? 1.3 : 0.75;
         if (this.phaseT > (reduced ? wait * 0.6 : wait)) this.resolveShot();
         break;

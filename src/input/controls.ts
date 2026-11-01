@@ -22,6 +22,10 @@ export interface ControlHandlers {
   lookPan(dx: number, dy: number): void;
   lookPinch(scale: number, dAngle: number): void;
   lookZoom(f: number): void;
+  /** Bumblebee: the ball can be steered right now. */
+  steerActive(): boolean;
+  /** Steering input in [-1, 1] (left/right of the shot line). */
+  steer(v: number): void;
   /** Any tap on the course while the ball is moving (fast-forward / skip). */
   courseTap(): void;
   interacted(): void;
@@ -31,6 +35,8 @@ const DEG = Math.PI / 180;
 
 export class Controls {
   private aimPointer = -1;
+  private steerPointer = -1;
+  private steerStartX = 0;
   private aimLastX = 0;
   private aimLastT = 0;
   private aimMoved = 0;
@@ -89,7 +95,17 @@ export class Controls {
       this.h.interacted();
       if (e.target !== el && (e.target as HTMLElement).closest('button')) return;
       if (!this.h.canAim()) {
-        if (el === this.els.course) this.h.courseTap();
+        if (el !== this.els.course) return;
+        if (this.h.steerActive() && this.steerPointer === -1) {
+          this.steerPointer = e.pointerId;
+          this.steerStartX = e.clientX;
+          try {
+            el.setPointerCapture(e.pointerId);
+          } catch {
+            /* ignore */
+          }
+          e.preventDefault();
+        } else this.h.courseTap();
         return;
       }
       if (this.aimPointer !== -1) return;
@@ -107,6 +123,10 @@ export class Controls {
       e.preventDefault();
     });
     el.addEventListener('pointermove', (e) => {
+      if (e.pointerId === this.steerPointer) {
+        this.h.steer(Math.max(-1, Math.min(1, (e.clientX - this.steerStartX) / 70)));
+        return;
+      }
       if (e.pointerId !== this.aimPointer) return;
       const dx = e.clientX - this.aimLastX;
       const dt = Math.max(1, e.timeStamp - this.aimLastT);
@@ -122,6 +142,11 @@ export class Controls {
       this.els.aimTicks.style.backgroundPositionX = `${this.tickOffset}px`;
     });
     const end = (e: PointerEvent) => {
+      if (e.pointerId === this.steerPointer) {
+        this.steerPointer = -1;
+        this.h.steer(0);
+        return;
+      }
       if (e.pointerId !== this.aimPointer) return;
       this.aimPointer = -1;
       this.els.aimStrip.classList.remove('dragging');
@@ -316,6 +341,10 @@ export class Controls {
   /** Abort any gesture in progress (tab hidden, menu opened, etc.). */
   cancelAll() {
     this.lookPts.clear();
+    if (this.steerPointer !== -1) {
+      this.steerPointer = -1;
+      this.h.steer(0);
+    }
     this.pinchPrev = null;
     if (this.swingPointer !== -1) {
       this.swingPointer = -1;
