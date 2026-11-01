@@ -1,0 +1,6 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "golf", "runtimeExecutable": "npx", "runtimeArgs": ["vite", "--host", "--port", "5173", "--strictPort"], "port": 5173 }
+  ]
+}
