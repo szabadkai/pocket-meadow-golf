@@ -143,6 +143,7 @@ export class UI {
     this.hudVisible = v;
     this.$('hud').classList.toggle('hidden', !v);
     if (!v) {
+      this.hidePuttingRead();
       this.hidePower();
       this.hideLanding();
       this.hideSpeech();
@@ -150,6 +151,7 @@ export class UI {
   }
 
   setFlying(v: boolean) {
+    if (v) this.hidePuttingRead();
     this.$('hud').classList.toggle('flying', v);
     this.$('pad').classList.toggle('disabled', v);
     this.$('meterPad').classList.toggle('disabled', v);
@@ -257,6 +259,20 @@ export class UI {
     el.classList.toggle('ghost', ghost);
     if (el.textContent !== text) el.textContent = text;
     el.style.transform = `translate(${Math.round(Math.max(30, Math.min(r.w - 30, lx)))}px, ${Math.round(Math.max(26, ly))}px) translate(-50%, -150%)`;
+  }
+
+  showPuttingRead(read: { slope: string; break: string; danger: boolean }, power: string, note: string) {
+    const el = this.$('puttingRead');
+    el.classList.remove('hidden');
+    el.classList.toggle('danger', read.danger);
+    for (const [id, text] of [['puttingSlope', read.slope], ['puttingBreak', read.break], ['puttingPower', power], ['puttingNote', note]]) {
+      const field = this.$(id);
+      if (field.textContent !== text) field.textContent = text;
+    }
+  }
+
+  hidePuttingRead() {
+    this.$('puttingRead').classList.add('hidden');
   }
 
   hideLanding() {

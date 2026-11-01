@@ -47,6 +47,7 @@ export class Effects {
   private slopeCount = 0;
   slopeVisible = false;
   private puttDots: THREE.InstancedMesh;
+  private puttDotsShadow: THREE.InstancedMesh;
 
   constructor() {
     const ballGeo = GEO.sphere;
@@ -72,10 +73,13 @@ export class Effects {
     this.aimDotsShadow.count = 0;
     this.group.add(this.aimDotsShadow, this.aimDots);
 
-    this.puttDots = new THREE.InstancedMesh(GEO.sphereLo, new THREE.MeshBasicMaterial({ color: 0xffffff }), 40);
+    this.puttDots = new THREE.InstancedMesh(GEO.sphereLo, new THREE.MeshBasicMaterial({ color: 0xffffff }), MAX_PATH_POINTS);
     this.puttDots.frustumCulled = false;
     this.puttDots.count = 0;
-    this.group.add(this.puttDots);
+    this.puttDotsShadow = new THREE.InstancedMesh(GEO.sphereLo, new THREE.MeshBasicMaterial({ color: 0x244c35, side: THREE.BackSide }), MAX_PATH_POINTS);
+    this.puttDotsShadow.frustumCulled = false;
+    this.puttDotsShadow.count = 0;
+    this.group.add(this.puttDotsShadow, this.puttDots);
 
     this.marker = new THREE.Group();
     this.markerMat = new THREE.MeshBasicMaterial({ color: PALETTE.coral, transparent: true, opacity: 0.95, depthWrite: false });
@@ -255,30 +259,47 @@ export class Effects {
     this.markerMat.opacity = ghost ? 0.55 : 0.95;
   }
 
-  /** Straight dotted line for putts (no curve: the slope arrows do the reading). */
-  showPutt(fromX: number, fromZ: number, toX: number, toZ: number, world: CourseWorld, dotScale: number) {
-    const len = Math.hypot(toX - fromX, toZ - fromZ);
-    const n = Math.min(40, Math.max(2, Math.round(len / Math.max(0.6, dotScale * 4))));
+  /** Follow the real curved roll, resampling the bounded path into evenly spaced beads. */
+  showPutt(pred: Prediction, dotScale: number, ghost: boolean) {
+    this.showAim(null, dotScale, ghost);
+    if (!pred.valid || pred.count < 2) { this.hidePutt(); return; }
+    const p = pred.path;
+    let total = 0;
+    for (let i = 1; i < pred.count; i++) total += Math.hypot(p[i * 3] - p[i * 3 - 3], p[i * 3 + 2] - p[i * 3 - 1]);
+    const n = Math.min(MAX_PATH_POINTS, Math.max(3, Math.round(total / Math.max(0.35, dotScale * 4))));
+    let seg = 1, distance = 0;
+    let len = Math.hypot(p[3] - p[0], p[5] - p[2]);
     for (let i = 1; i <= n; i++) {
-      const t = i / n;
-      const x = fromX + (toX - fromX) * t;
-      const z = fromZ + (toZ - fromZ) * t;
-      const s = dotScale * 0.55;
-      tmpM.compose(tmpP.set(x, world.heightAt(x, z) + 0.12, z), tmpQ.identity(), tmpS.set(s, s * 0.5, s));
+      const at = total * i / n;
+      while (distance + len < at && seg < pred.count - 1) {
+        distance += len;
+        seg++;
+        len = Math.hypot(p[seg * 3] - p[seg * 3 - 3], p[seg * 3 + 2] - p[seg * 3 - 1]);
+      }
+      const t = len > 0 ? Math.min(1, (at - distance) / len) : 0;
+      const x = p[seg * 3 - 3] + (p[seg * 3] - p[seg * 3 - 3]) * t;
+      const y = p[seg * 3 - 2] + (p[seg * 3 + 1] - p[seg * 3 - 2]) * t;
+      const z = p[seg * 3 - 1] + (p[seg * 3 + 2] - p[seg * 3 - 1]) * t;
+      const size = dotScale * (ghost ? 0.7 : 0.8);
+      tmpM.compose(tmpP.set(x, y, z), tmpQ.identity(), tmpS.set(size, size * 0.5, size));
       this.puttDots.setMatrixAt(i - 1, tmpM);
+      tmpM.compose(tmpP, tmpQ, tmpS.set(size * 1.5, size * 0.85, size * 1.5));
+      this.puttDotsShadow.setMatrixAt(i - 1, tmpM);
     }
-    this.puttDots.count = n;
-    this.puttDots.instanceMatrix.needsUpdate = true;
+    this.puttDots.count = this.puttDotsShadow.count = n;
+    this.puttDots.instanceMatrix.needsUpdate = this.puttDotsShadow.instanceMatrix.needsUpdate = true;
+    (this.puttDots.material as THREE.MeshBasicMaterial).color.setHex(pred.surface === 5 || pred.surface === 0 ? PALETTE.coral : PALETTE.butter);
+    this.placeMarker(pred, dotScale, ghost);
   }
 
   hidePutt() {
-    this.puttDots.count = 0;
+    this.puttDots.count = this.puttDotsShadow.count = 0;
   }
 
   hideAim() {
     this.aimDots.count = 0;
     this.aimDotsShadow.count = 0;
-    this.puttDots.count = 0;
+    this.puttDots.count = this.puttDotsShadow.count = 0;
     this.marker.visible = false;
   }
 

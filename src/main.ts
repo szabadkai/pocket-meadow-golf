@@ -51,7 +51,7 @@ async function boot() {
     // Dev-only test hooks: ?hole=3 opens a practice hole, &swing=0.8 takes one shot.
     (window as unknown as { __game: unknown }).__game = game;
     const q = new URLSearchParams(location.search);
-    if (q.has('hole')) game.devPractice(Number(q.get('hole')) - 1, q.has('swing') ? Number(q.get('swing')) : null);
+    if (q.has('hole')) game.devPractice(Number(q.get('hole')) - 1, q.has('swing') ? Number(q.get('swing')) : null, q.has('putt'));
   }
 }
 

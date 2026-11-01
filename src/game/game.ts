@@ -7,7 +7,7 @@ import { SwingMeter, type MeterResult } from '../sim/meter';
 import { BALL_RADIUS, DT, MAX_STROKES, SURFACES, Surface, type SurfaceId } from '../sim/constants';
 import { formatToPar, oobDrop, roundTotals, scoreName, waterDrop } from '../sim/rules';
 import { toWorld } from '../sim/shapes';
-import { clubById, launch, lieMultiplier, makePrediction, predict, yawTo, type ClubId } from '../sim/shot';
+import { clubById, launch, lieMultiplier, makePrediction, predict, puttingRead, yawTo, type ClubId } from '../sim/shot';
 import { CourseWorld } from '../sim/world';
 import { UI } from '../ui/ui';
 import { FLIGHT_PITCH, PITCH } from '../render/cameraRig';
@@ -70,6 +70,9 @@ export class Game {
   private pullPower = 0;
   private overview = false;
   private predDirty = true;
+  private puttPredictionKey = '';
+  private puttPredictionWorld: CourseWorld | null = null;
+  private puttPredictionAt = -Infinity;
   private shotYaw = 0;
   private shotClub: ClubId = 'driver';
   private shotPower = 0;
@@ -306,7 +309,7 @@ export class Game {
       swingUpdate: (p: number, cancel: boolean, x: number, _y: number, startY: number) => {
         this.pullPower = p;
         // Predict now so the bubble and the in-world marker always agree.
-        if (this.club !== 'putter') this.computePrediction(false);
+        this.computePrediction(false);
         this.predDirty = false;
         const tick = Math.floor(p * 4);
         if (tick !== this.lastSwingTick) {
@@ -335,7 +338,7 @@ export class Game {
       },
       tapPowerChanged: (p: number) => {
         this.pullPower = p;
-        if (this.club !== 'putter') this.computePrediction(false);
+        this.computePrediction(false);
         this.predDirty = false;
         this.ui.setTapPower(p, this.carryLabel(p));
         this.wake();
@@ -522,8 +525,14 @@ export class Game {
   }
 
   /** Dev helper for automated checks (see main.ts). */
-  devPractice(i: number, swing: number | null) {
+  devPractice(i: number, swing: number | null, putting = false) {
     this.startPractice(Math.max(0, Math.min(8, i)));
+    if (putting) {
+      this.ballX = this.world.cupX + 7;
+      this.ballZ = this.world.cupZ + 8;
+      this.sim.place(this.ballX, this.ballZ);
+      this.prepareAim(null, 'putter');
+    }
     if (swing == null) return;
     const wait = () => (this.phase === 'aim' ? this.beginSwing(swing) : window.setTimeout(wait, 100));
     wait();
@@ -650,16 +659,14 @@ export class Game {
   private refreshTapLabel() {
     if (this.store.settings.swingMode !== 'tap') return;
     const p = this.controls.tapPower;
-    if (this.club !== 'putter') {
-      this.pullPower = p;
-      this.computePrediction(false);
-    }
+    this.pullPower = p;
+    this.computePrediction(false);
     this.ui.setTapPower(p, this.carryLabel(p));
   }
 
   private carryLabel(p: number): string {
     const eff = p * lieMultiplier(this.club, this.lie);
-    if (this.club === 'putter') return `${Math.round(eff * 30)}y roll`;
+    if (this.club === 'putter') return this.pred.valid && this.pred.kind === 'roll' ? `${this.pred.carry.toFixed(1)}y est. roll` : `${Math.round(eff * 30)}y flat roll`;
     // Use the live prediction when available (includes wind and slope).
     const tap = this.store.settings.swingMode === 'tap';
     if (this.pred.valid && (this.pulling || tap)) return `${Math.round(this.pred.carry)}y carry`;
@@ -1344,7 +1351,13 @@ export class Game {
       const reach = Math.max(8, Math.min(34, dc + 4));
       put(this.ballX + dx * reach, by, this.ballZ + dz * reach);
       if (dc < 36) put(w.cupX, w.heightAt(w.cupX, w.cupZ), w.cupZ);
-      this.r.rig.frame(pts, n, this.yaw, { padTop: this.topPad(), padBottom: 40, padSide: 40, minExtent: 16, maxScale: 0.2 });
+      this.computePrediction(!this.pulling && this.store.settings.swingMode !== 'tap');
+      if (this.pred.valid) {
+        const stride = Math.max(1, Math.ceil(this.pred.count / 12));
+        for (let i = 0; i < this.pred.count; i += stride) put(this.pred.path[i * 3], this.pred.path[i * 3 + 1], this.pred.path[i * 3 + 2]);
+        put(this.pred.x, this.pred.y, this.pred.z);
+      }
+      this.r.rig.frame(pts, n, this.yaw, { padTop: this.topPad(), padBottom: 96, padSide: 40, minExtent: 16, maxScale: 0.2 });
     } else {
       // Frame the full-power reach along the aim line, so the whole possible landing area is visible.
       const reach = clubById(this.club).maxCarry * lieMultiplier(this.club, this.lie) * 1.05;
@@ -1414,16 +1427,42 @@ export class Game {
   }
 
   // ------------------------------------------------------------------ prediction
+  private previewPower(ghost: boolean): number {
+    if (ghost && this.club === 'putter') {
+      const toCup = Math.hypot(this.world.cupX - this.ballX, this.world.cupZ - this.ballZ);
+      return Math.min(1, (toCup + 1.5) / clubById('putter').maxCarry);
+    }
+    return ghost ? 1 : this.store.settings.swingMode === 'tap' && !this.pulling && this.phase === 'aim' ? this.controls.tapPower : this.pullPower;
+  }
+
   private computePrediction(ghost: boolean) {
-    const power = ghost ? 1 : this.store.settings.swingMode === 'tap' && !this.pulling && this.phase === 'aim' ? this.controls.tapPower : this.pullPower;
-    // The preview shows a calm-air landing: reading the wind is the player's job.
+    let power = this.previewPower(ghost);
+    // The green read assumes a centred strike, including the existing perfect-strike bonus.
+    // beginSwing has already applied that bonus, so never apply it twice.
+    if (this.club === 'putter' && this.store.settings.swingMode === 'meter' && (this.phase === 'aim' || this.phase === 'intro')) power *= 1.06;
+    const item = this.itemArmed ? this.heldItem : null;
+    let key = '';
+    if (this.club === 'putter') {
+      key = `${this.ballX},${this.ballZ},${this.yaw},${power},${item}`;
+      if (this.pred.kind === 'roll' && this.pred.valid && this.puttPredictionWorld === this.world) {
+        if (key === this.puttPredictionKey) return;
+        // Limit charging previews to 30 Hz on phones; release and aim changes resolve exactly.
+        if (this.meter.stage === 'power' && this.time - this.puttPredictionAt < 1 / 30) return;
+      }
+    }
+    // Airborne previews remain calm-air carry estimates; putting uses the real roll model.
     predict(
       this.scratch,
       this.ballX,
       this.ballZ,
-      { club: this.club, power, yaw: this.yaw, lie: this.lie, windX: 0, windZ: 0, spin: this.spin, item: this.itemArmed ? this.heldItem : null },
+      { club: this.club, power, yaw: this.yaw, lie: this.lie, windX: this.club === 'putter' ? this.windX : 0, windZ: this.club === 'putter' ? this.windZ : 0, spin: this.spin, item: this.itemArmed ? this.heldItem : null },
       this.pred,
     );
+    if (this.club === 'putter') {
+      this.puttPredictionKey = key;
+      this.puttPredictionWorld = this.world;
+      this.puttPredictionAt = this.time;
+    }
   }
 
   private refreshAimVisuals() {
@@ -1433,18 +1472,26 @@ export class Game {
     const tapMode = this.store.settings.swingMode === 'tap';
     const ghost = !this.pulling && !tapMode;
     if (this.club === 'putter') {
-      const w = this.world;
-      const dc = Math.hypot(w.cupX - this.ballX, w.cupZ - this.ballZ);
-      const p = ghost ? Math.min(1, (dc + 1.5) / 30) : this.pulling ? this.pullPower : this.controls.tapPower;
-      const len = p * 30;
-      const ex = this.ballX + Math.sin(this.yaw) * len;
-      const ez = this.ballZ - Math.cos(this.yaw) * len;
-      fx.showAim(null, dot, ghost);
-      fx.showPutt(this.ballX, this.ballZ, ex, ez, w, dot);
-      this.pred.valid = false;
-      this.ui.showLanding(this.r.rig, ex, w.heightAt(ex, ez), ez, ghost ? `${Math.round(dc)}y to cup` : `${Math.round(len)}y`, ghost);
+      if (this.predDirty) {
+        this.computePrediction(ghost);
+        this.predDirty = false;
+      }
+      fx.showPutt(this.pred, dot, ghost);
+      if (this.pred.valid) {
+        const read = puttingRead(this.pred);
+        const power = this.previewPower(ghost);
+        const mode = ghost ? 'Preview' : this.meter.stage === 'power' ? 'Charging' : this.meter.active ? 'Locked' : this.pulling ? 'Live' : 'Selected';
+        const strike = this.store.settings.swingMode === 'meter' ? 'Perfect-strike estimate' : 'Straight-strike estimate';
+        this.ui.showPuttingRead(read, `${mode} · ${Math.round(power * 100)}% power`, strike);
+        if (this.overview) this.ui.hidePuttingRead();
+        this.ui.showLanding(this.r.rig, this.pred.x, this.pred.y, this.pred.z, read.stop, ghost);
+      } else {
+        this.ui.hidePuttingRead();
+        this.ui.hideLanding();
+      }
       return;
     }
+    this.ui.hidePuttingRead();
     if (this.predDirty) {
       this.computePrediction(ghost);
       this.predDirty = false;
@@ -1501,7 +1548,7 @@ export class Game {
         btn: false,
       },
       { t: 'Lovely! Tap Look any time to see the whole hole. Drag to look around, pinch to zoom, twist to turn.', btn: true },
-      { t: 'On the green, the little arrows show which way it slopes. Putts curl downhill!', btn: true },
+      { t: 'The dotted putting line follows the slope. Pip’s green read shows the break and estimated stop. Watch it change as you hold for power!', btn: true },
     ];
     const s = steps[this.tutorialStep];
     if (!s) return this.endTutorial();
@@ -1595,6 +1642,7 @@ export class Game {
           const m = this.meter;
           this.pullPower = m.stage === 'power' ? Math.max(0, m.u) : m.power;
           this.predDirty = true;
+          if (this.club === 'putter') { this.computePrediction(false); this.predDirty = false; }
           // Hold the backswing pose until the accuracy press commits the downswing.
           this.r.golfer.setSwing(-this.pullPower);
           if (m.active) {
@@ -1720,6 +1768,7 @@ export class Game {
     if (this.phase === 'aim') {
       this.refreshAimVisuals();
     } else if (this.phase !== 'swing') {
+      this.ui.hidePuttingRead();
       fx.hideAim();
       if (this.phase !== 'intro') this.ui.hideLanding();
     }

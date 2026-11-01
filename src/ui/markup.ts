@@ -45,6 +45,11 @@ export const HUD_HTML = `
       <button id="zoomOut" class="bigBtn round" aria-label="Zoom out">−</button>
     </div>
     <div id="lookHint" class="lookHint hidden">Drag to look · pinch or +/− to zoom · twist to turn</div>
+    <aside id="puttingRead" class="puttingRead hidden" aria-label="Pip's green read">
+      <div class="puttingReadHead"><b>Pip’s green read</b><span id="puttingPower"></span></div>
+      <div class="puttingReadValues"><strong id="puttingSlope"></strong><strong id="puttingBreak"></strong></div>
+      <small id="puttingNote">Perfect-strike estimate</small>
+    </aside>
     <div id="landLabel" class="landLabel hidden">0y</div>
     <div id="pip" class="speech hidden" role="status" aria-live="polite">
       <div class="pipFace" aria-hidden="true"></div>

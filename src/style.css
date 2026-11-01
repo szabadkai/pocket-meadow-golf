@@ -1695,3 +1695,29 @@ table.sc td.tot {
   white-space: normal;
   font-size: 8px;
 }
+
+/* A compact green read sits above the aim bar, clear of the ball and thumb. */
+.puttingRead {
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  left: 76px;
+  max-width: 310px;
+  margin-left: auto;
+  padding: 9px 12px;
+  background: #fff4dced;
+  border: 2px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 3px 0 #3b2f2a33;
+  pointer-events: none;
+}
+.puttingReadHead, .puttingReadValues { display: flex; justify-content: space-between; gap: 8px; }
+.puttingReadHead { align-items: baseline; margin-bottom: 5px; }
+.puttingReadHead b { font-size: 12px; color: #2f674b; }
+.puttingReadHead span { font-size: 9px; font-weight: 700; }
+.puttingReadValues strong { font-size: 12px; }
+.puttingRead small { display: block; margin-top: 4px; font-size: 9px; opacity: .7; }
+.puttingRead.danger { background: #ffe3d5; }
+@media (orientation: landscape) and (max-height: 600px) {
+  .puttingRead { max-width: 270px; padding: 6px 9px; }
+}

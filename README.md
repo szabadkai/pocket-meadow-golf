@@ -36,7 +36,7 @@ Everything works with one thumb. There's no keyboard, hover, right-click or prec
 | **Skip** | Tap the course during a shot to fast-forward, or during a celebration to skip it. |
 | Desktop extras | Mouse works like a finger; ← → also aim. |
 
-There are no hidden random accuracy errors. Where the ball goes depends on aim, power, meter timing, club, lie, spin, item, wind and terrain. The yellow dotted arc and ring show the **estimated first landing in calm air**, from the same simulation the real shot uses. Wind isn't included in the preview, so allowing for it is your call. The wind indicator and Pip's pre-shot read help. Roll after landing isn't shown, so judging it is part of the skill. Putts show a straight flat-green line, and the drifting arrows on the green show its slope.
+There are no hidden random accuracy errors. Where the ball goes depends on aim, power, meter timing, club, lie, spin, item, wind and terrain. The yellow dotted arc and ring show the **estimated first landing in calm air**, from the same simulation the real shot uses. Wind isn't included in the preview, so allowing for it is your call. The wind indicator and Pip's pre-shot read help. Roll after landing isn't shown, so judging it is part of the skill. Putts show a **curved, slope-aware roll preview** and an estimated stopping ring. **Pip’s green read** reports uphill/downhill grade and left/right break relative to your aim. The idle preview labels the power it uses; while charging, it follows your actual power. It uses the same slopes, friction, cup capture, hazards and active item as the real shot. In Hold mode it is explicitly a **perfect-strike estimate**, including the existing 6% perfect bonus; timing errors can still change the result. Other swing modes show a straight-strike estimate. The drifting arrows remain visible to help you read the green yourself.
 
 ## The fun layer
 
@@ -111,7 +111,7 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 
 ## Testing done (and how)
 
-- **Automated** (`npm test`, 85 tests): spin roll-out, every basket item, sheep and mole bounces, per-round moles, errand completion and failure, star scoring, and projects changing the course; the swing meter’s hold/release power locking, constant return timing, power-scaled straight zones, maximum-power release gate, deterministic early/late grading, timeout and cancellation; pointer capture, multiple touches, synthetic clicks, lost capture, right-click filtering and the Space-key sequence; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
+- **Automated** (`npm test`, 95 tests): spin roll-out, every basket item, sheep and mole bounces, per-round moles, errand completion and failure, star scoring, and projects changing the course; slope-aware putting predictions matching actual shots on all nine greens, uphill/downhill pace, break direction, fringe resistance, cup capture/lip-outs, hazards, snail item behavior, and bounded path sampling; the swing meter’s hold/release power locking, constant return timing, power-scaled straight zones, maximum-power release gate, deterministic early/late grading, timeout and cancellation; pointer capture, multiple touches, synthetic clicks, lost capture, right-click filtering and the Space-key sequence; carry calibration, linear power, prediction matching the real first landing exactly, wind, anti-tunnelling, tree deflection, rolling and surfaces, green break, ball holding on slopes, cup capture, lip-outs, skip-proof cup tests, dunks, water and OOB detection, relief drops (dry, playable, not nearer the hole), scoring, and course data sanity. Two bots play every hole through the real simulation:
   - a search bot proves each hole is completable within par+1 at maximum head- and crosswind;
   - a straightforward bot (default aim, power = distance ÷ club range, no wind compensation) must finish within par+3.
 - **Desktop browser with mobile emulation** (375×812 portrait and 812×375 landscape, via the built-in browser): played hole 1 end to end with real drags on the swing pad (drive → wedge → putt → birdie), checked every hole's overview, a water penalty with the island drop zone, tap-swing mode, the round-complete screen and best score, resume after reload, simulated tab hide/show mid-flight (the simulation pauses and resumes without jumping), forced WebGL context loss and restore, and that audio starts only after a real tap.
@@ -127,7 +127,7 @@ Performance measures: the backing resolution is capped by both a DPR ceiling and
 - Two tabs open at once share one save, and whichever writes last wins.
 - Spin, items, errands, restoration and the rescue were tested in desktop emulation only: scripted shots plus screenshots.
 - Practice rounds aren't saved for resuming (your main round's save is never overwritten by practice).
-- Dev-only URL hooks (`?hole=3`, `&swing=0.8`) exist for automated checks and are disabled in production builds.
+- Dev-only URL hooks (`?hole=3`, `&swing=0.8`, `?hole=6&putt=1` for a green fixture) exist for automated checks and are disabled in production builds.
 
 ## GitHub Pages
 
@@ -136,3 +136,9 @@ Live game: https://szabadkai.github.io/pocket-meadow-golf/
 Pushing `main` runs `.github/workflows/deploy.yml`: clean install, the full test suite, a TypeScript/Vite build, then deployment of `dist/` to GitHub Pages. The relative Vite base keeps assets working at the repository URL. Failed tests prevent deployment.
 
 The hold-swing update has automated state-machine and actual input-handler regression tests in `tests/meter.test.ts` and `tests/controls.test.ts`. `tests/viewports.html` is a development-only portrait/landscape fixture. Physical phone touch and haptics still need real-device testing.
+
+## Pip’s green read
+
+Select the putter to see the roll path and green-read panel. This is a guide, not auto-aim: adjust your aim and power, then make your timing tap. The panel hides during the shot and in free-look mode. Curved roll predictions use `BallSim` and reusable, bounded path buffers; unchanged predictions are cached, and charging previews are limited to 30 Hz. Release resolves the exact power.
+
+Tune/read the implementation in `src/sim/shot.ts` (`predictRoll`, `puttingRead`), `src/render/effects.ts` (`showPutt`), and `src/game/game.ts` (`computePrediction`, `refreshAimVisuals`). Regression coverage lives in `tests/putting.test.ts`. Open `/tests/putting-viewports.html` on the development server for 390×812 and 812×375 fixtures. This update was checked in desktop browser fixtures, not on a physical phone.

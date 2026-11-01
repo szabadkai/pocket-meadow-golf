@@ -1,5 +1,5 @@
-import { BallSim, BallState } from './ball';
-import { DT, Surface, type SurfaceId } from './constants';
+import { BallSim, BallState, type BallStateId } from './ball';
+import { BALL_RADIUS, DT, MAX_SIM_TIME, Surface, type SurfaceId } from './constants';
 import { modsFor, type ItemId } from './items';
 import type { Collider, GroundModel } from './world';
 
@@ -157,7 +157,14 @@ export interface Prediction {
   carry: number;
   surface: SurfaceId;
   hitObstacle: boolean;
-  /** Flight path samples (xyz triplets). */
+  kind: 'carry' | 'roll';
+  /** Terminal rolling state; airborne predictions still stop at first contact. */
+  outcome: BallStateId;
+  /** Signed sideways break relative to the aim line (right positive), in yards. */
+  breakYards: number;
+  /** Height change over the predicted roll, in yards. */
+  rise: number;
+  /** Flight or rolling path samples (xyz triplets). */
   path: Float32Array;
   count: number;
 }
@@ -171,6 +178,10 @@ export function makePrediction(): Prediction {
     carry: 0,
     surface: Surface.Rough,
     hitObstacle: false,
+    kind: 'carry',
+    outcome: BallState.Rest,
+    breakYards: 0,
+    rise: 0,
     path: new Float32Array(MAX_PATH_POINTS * 3),
     count: 0,
   };
@@ -178,25 +189,15 @@ export function makePrediction(): Prediction {
 
 /**
  * Predicts the first landing point using the real simulation.
- * For the putter it reports the straight flat-green roll length along the aim line.
+ * Putts run to rest/cup/hazard using the same slopes, friction and items as play.
  */
 export function predict(sim: BallSim, fromX: number, fromZ: number, p: ShotParams, out: Prediction): Prediction {
   sim.listener = null;
   sim.place(fromX, fromZ);
-  if (p.club === 'putter') {
-    const eff = Math.max(0, Math.min(1, p.power));
-    const len = eff * clubById('putter').maxCarry;
-    const [dx, dz] = aimDir(p.yaw);
-    out.valid = true;
-    out.x = fromX + dx * len;
-    out.z = fromZ + dz * len;
-    out.y = sim.ground.heightAt(out.x, out.z);
-    out.carry = len;
-    out.surface = sim.ground.surfaceAt(out.x, out.z);
-    out.hitObstacle = false;
-    out.count = 0;
-    return out;
-  }
+  out.kind = p.club === 'putter' ? 'roll' : 'carry';
+  out.breakYards = out.rise = 0;
+  out.outcome = BallState.Rest;
+  if (p.club === 'putter') return predictRoll(sim, fromX, fromZ, p, out);
   sim.stopAtFirstContact = true;
   launch(sim, p);
   // Sample roughly evenly in time.
@@ -228,4 +229,68 @@ export function predict(sim: BallSim, fromX: number, fromZ: number, p: ShotParam
   out.hitObstacle = sim.hitObstacle;
   out.carry = Math.hypot(sim.landX - fromX, sim.landZ - fromZ);
   return out;
+}
+
+/** Bounded, allocation-free roll sampling; compact the history if a slow putt runs long. */
+function predictRoll(sim: BallSim, fromX: number, fromZ: number, p: ShotParams, out: Prediction): Prediction {
+  sim.stopAtFirstContact = false;
+  launch(sim, p);
+  const startY = sim.ground.heightAt(fromX, fromZ);
+  let count = 1;
+  let stride = 4;
+  let length = 0;
+  out.path[0] = fromX;
+  out.path[1] = startY + BALL_RADIUS;
+  out.path[2] = fromZ;
+  const maxSteps = Math.ceil(MAX_SIM_TIME / DT) + 2;
+  for (let step = 1; step <= maxSteps && sim.moving; step++) {
+    const x = sim.x, z = sim.z;
+    sim.step(DT);
+    length += Math.hypot(sim.x - x, sim.z - z);
+    if (step % stride !== 0 || !sim.moving) continue;
+    if (count === MAX_PATH_POINTS - 1) {
+      let kept = 0;
+      for (let i = 0; i < count; i += 2) {
+        out.path[kept * 3] = out.path[i * 3];
+        out.path[kept * 3 + 1] = out.path[i * 3 + 1];
+        out.path[kept * 3 + 2] = out.path[i * 3 + 2];
+        kept++;
+      }
+      count = kept;
+      stride *= 2;
+      if (step % stride !== 0) continue;
+    }
+    out.path[count * 3] = sim.x;
+    out.path[count * 3 + 1] = sim.y;
+    out.path[count * 3 + 2] = sim.z;
+    count++;
+  }
+  // Keep the final dot on the surface, even when the simulated ball drops into the cup.
+  const endY = sim.ground.heightAt(sim.x, sim.z) + BALL_RADIUS;
+  out.path[count * 3] = sim.x;
+  out.path[count * 3 + 1] = endY;
+  out.path[count * 3 + 2] = sim.z;
+  out.count = count + 1;
+  out.valid = !sim.moving;
+  out.x = sim.x;
+  out.y = endY;
+  out.z = sim.z;
+  out.carry = length;
+  out.surface = sim.ground.surfaceAt(sim.x, sim.z);
+  out.hitObstacle = sim.hitObstacle;
+  out.outcome = sim.state;
+  out.breakYards = (sim.x - fromX) * Math.cos(p.yaw) + (sim.z - fromZ) * Math.sin(p.yaw);
+  out.rise = endY - BALL_RADIUS - startY;
+  return out;
+}
+
+/** Labels describe the estimate; timing and aim remain the player's decisions. */
+export function puttingRead(pred: Prediction): { slope: string; break: string; stop: string; danger: boolean } {
+  const grade = pred.carry > 0.1 ? pred.rise / pred.carry * 100 : 0;
+  const slope = Math.abs(grade) < 0.5 ? 'Mostly level' : `${grade > 0 ? '↑ Uphill' : '↓ Downhill'} ${Math.abs(grade).toFixed(1)}%`;
+  const bend = Math.abs(pred.breakYards);
+  const breakText = bend < 0.15 ? 'Nearly straight' : `${pred.breakYards < 0 ? '← Left' : 'Right →'} ${bend.toFixed(1)}y`;
+  const danger = pred.outcome === BallState.Water || pred.outcome === BallState.OOB;
+  const stop = pred.outcome === BallState.Holed ? 'Cup on this line' : pred.outcome === BallState.Water ? 'Water on this line' : pred.outcome === BallState.OOB ? 'Out of bounds' : `Est. ${pred.carry.toFixed(1)}y roll`;
+  return { slope, break: breakText, stop, danger };
 }
